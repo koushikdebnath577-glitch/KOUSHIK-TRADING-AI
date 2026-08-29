@@ -1,0 +1,6 @@
+{
+  "name": "KOUSHIK TRADING AI",
+  "description": "Professional Indian stock market intraday trading analysis assistant with Angel One SmartAPI integration, multi-timeframe candlestick chart, resistance rejection, breakout analysis, key levels, and conservative entry engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
