@@ -1,0 +1,24 @@
+# Environment variables (Sensitive secrets)
+.env
+.env.local
+.env.*.local
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Build and Cache
+.cache/
+dist/
+build/

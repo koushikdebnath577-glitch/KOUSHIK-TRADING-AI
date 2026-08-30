@@ -1,0 +1,32 @@
+{
+  "name": "koushik-trading-ai-backend",
+  "version": "1.0.0",
+  "description": "Production-ready Node.js backend proxy and market data engine for Koushik Trading AI Android application, integrating Angel One SmartAPI with real-time 1-second candle aggregation.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "trading",
+    "angel-one",
+    "smartapi",
+    "market-data",
+    "websocket",
+    "candles",
+    "koushik-trading-ai"
+  ],
+  "author": "Koushik Trading AI",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "otplib": "^12.0.1",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
