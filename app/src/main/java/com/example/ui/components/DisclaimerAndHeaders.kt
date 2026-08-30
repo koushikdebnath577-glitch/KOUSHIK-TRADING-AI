@@ -71,8 +71,8 @@ fun ConnectionStatusHeader(
 ) {
     val isPositive = change >= 0
     val statusColor = when (status) {
-        ConnectionStatus.LIVE -> BullishGreen
-        ConnectionStatus.RECONNECTING -> KeyLevelYellow
+        ConnectionStatus.CONNECTED -> BullishGreen
+        ConnectionStatus.CONNECTING -> KeyLevelYellow
         ConnectionStatus.DISCONNECTED -> BearishRed
     }
 

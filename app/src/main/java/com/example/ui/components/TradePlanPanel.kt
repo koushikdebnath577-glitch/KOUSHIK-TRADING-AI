@@ -24,11 +24,15 @@ import com.example.ui.theme.*
 @Composable
 fun TradePlanPanel(
     analysisResult: AnalysisResult,
+    riskAmount: Double = 2500.0,
+    onEditRisk: (() -> Unit)? = null,
     onSavePlan: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val entry = analysisResult.conservativeEntry ?: analysisResult.normalEntry ?: analysisResult.aggressiveEntry
     val isShort = analysisResult.direction == TradeDirection.SHORT
+    val riskPerShare = if (entry != null) kotlin.math.abs(entry.entryPrice - entry.stopLoss) else 0.0
+    val calculatedQty = if (riskPerShare > 0.05) (riskAmount / riskPerShare).toInt().coerceAtLeast(1) else 1
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -117,6 +121,18 @@ fun TradePlanPanel(
                     PlanRow(label = "Target 1 (1:1.5 RR)", value = "₹${entry.target1}", valueColor = BullishGreen)
                     PlanRow(label = "Target 2 (1:2.5 RR)", value = "₹${entry.target2}", valueColor = BullishGreenDark)
                     PlanRow(label = "Risk:Reward Ratio", value = "1 : ${entry.riskRewardRatio}", valueColor = KeyLevelYellow, isBold = true)
+                    PlanRow(
+                        label = "Risk Budget per Trade",
+                        value = "₹${if (riskAmount % 1.0 == 0.0) riskAmount.toInt() else String.format(java.util.Locale.US, "%.2f", riskAmount)}",
+                        valueColor = KeyLevelYellow,
+                        isBold = true
+                    )
+                    PlanRow(
+                        label = "Recommended Position Size",
+                        value = "$calculatedQty shares",
+                        valueColor = CyanAccent,
+                        isBold = true
+                    )
                     PlanRow(label = "Confirmation", value = analysisResult.confirmationStatus.label, valueColor = TextSecondary)
                 }
             }

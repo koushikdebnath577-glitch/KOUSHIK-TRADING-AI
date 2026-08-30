@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.AlertEntity
 import com.example.data.local.AppDatabase
 import com.example.data.local.SavedPlanEntity
+import com.example.data.local.UserPreferences
 import com.example.data.local.WatchlistEntity
 import com.example.data.model.*
 import com.example.data.remote.BackendConfig
@@ -30,8 +31,8 @@ data class TradingUiState(
     val indicatorSettings: TradingRepository.IndicatorSettings = TradingRepository.IndicatorSettings(),
     val searchQuery: String = "",
     val activeTab: Int = 2, // 0: Home, 1: Markets, 2: Analyze, 3: Watchlist, 4: Settings
-    val defaultRiskAmount: Double = 2500.0,
-    val defaultTargetRR: Double = 2.0,
+    val defaultRiskAmount: Double = UserPreferences.DEFAULT_RISK_AMOUNT,
+    val defaultTargetRR: Double = UserPreferences.DEFAULT_TARGET_RR,
     val userSavedNotes: String = "",
     val isPlanSavedSnackbarShown: Boolean = false,
     val activeBannerDismissed: Boolean = false
@@ -39,10 +40,16 @@ data class TradingUiState(
 
 class TradingViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val userPreferences = UserPreferences(application)
     private val db = AppDatabase.getDatabase(application)
     private val repository = TradingRepository(db.appDao())
 
-    private val _uiState = MutableStateFlow(TradingUiState())
+    private val _uiState = MutableStateFlow(
+        TradingUiState(
+            defaultRiskAmount = userPreferences.getIntradayRisk(),
+            defaultTargetRR = userPreferences.getTargetRR()
+        )
+    )
     val uiState: StateFlow<TradingUiState> = _uiState.asStateFlow()
 
     val marketSymbols: StateFlow<List<StockSymbol>> = repository.marketSymbols
@@ -199,7 +206,27 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateRiskSettings(risk: Double, targetRR: Double) {
-        _uiState.update { it.copy(defaultRiskAmount = risk, defaultTargetRR = targetRR) }
+        if (risk > 0.0) {
+            userPreferences.saveIntradayRisk(risk)
+        }
+        if (targetRR > 0.0) {
+            userPreferences.saveTargetRR(targetRR)
+        }
+        _uiState.update { it.copy(defaultRiskAmount = if (risk > 0.0) risk else it.defaultRiskAmount, defaultTargetRR = if (targetRR > 0.0) targetRR else it.defaultTargetRR) }
+    }
+
+    fun updateRiskAmount(risk: Double) {
+        if (risk > 0.0) {
+            userPreferences.saveIntradayRisk(risk)
+            _uiState.update { it.copy(defaultRiskAmount = risk) }
+        }
+    }
+
+    fun updateTargetRR(targetRR: Double) {
+        if (targetRR > 0.0) {
+            userPreferences.saveTargetRR(targetRR)
+            _uiState.update { it.copy(defaultTargetRR = targetRR) }
+        }
     }
 
     fun updateBackendConfig(config: BackendConfig) {

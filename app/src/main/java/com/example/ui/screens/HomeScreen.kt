@@ -29,6 +29,8 @@ import com.example.ui.theme.*
 @Composable
 fun HomeScreen(
     symbols: List<StockSymbol>,
+    defaultRiskAmount: Double = 2500.0,
+    onEditRisk: () -> Unit = {},
     onSelectStockAndAnalyze: (String, StrategyType) -> Unit,
     onNavigateToMarkets: () -> Unit,
     onNavigateToWatchlist: () -> Unit,
@@ -89,6 +91,84 @@ fun HomeScreen(
         // Legal & Safety Disclaimer
         item {
             DisclaimerBanner()
+        }
+
+        // Intraday Risk Quick Access Card
+        item {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = BgCard,
+                border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
+                modifier = Modifier.fillMaxWidth().testTag("home_risk_banner")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(KeyLevelYellowBg),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = KeyLevelYellow,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Intraday Risk per Trade",
+                                fontSize = 10.sp,
+                                color = TextSecondary
+                            )
+                            Text(
+                                text = "₹${if (defaultRiskAmount % 1.0 == 0.0) defaultRiskAmount.toInt() else String.format(java.util.Locale.US, "%.2f", defaultRiskAmount)}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = onEditRisk,
+                        shape = RoundedCornerShape(6.dp),
+                        color = CyanAccentBg,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
+                        modifier = Modifier.testTag("home_edit_risk_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit Risk",
+                                tint = CyanAccent,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = "Edit",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CyanAccent
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Market Indices Carousel

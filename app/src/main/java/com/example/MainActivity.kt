@@ -19,9 +19,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.StrategyType
+import com.example.ui.components.EditRiskDialog
 import com.example.ui.screens.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.TradingViewModel
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,7 +47,26 @@ fun TradingAppRoot(
     val alerts by viewModel.alerts.collectAsState()
     val savedPlans by viewModel.savedPlans.collectAsState()
 
+    var showEditRiskDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    if (showEditRiskDialog) {
+        EditRiskDialog(
+            currentRisk = uiState.defaultRiskAmount,
+            onDismiss = { showEditRiskDialog = false },
+            onSaveRisk = { newRisk ->
+                viewModel.updateRiskAmount(newRisk)
+                scope.launch {
+                    val formatted = if (newRisk % 1.0 == 0.0) newRisk.toInt().toString() else String.format(java.util.Locale.US, "%.2f", newRisk)
+                    snackbarHostState.showSnackbar(
+                        message = "Intraday Risk updated to ₹$formatted per trade",
+                        duration = SnackbarDuration.Short
+                    )
+                }
+            }
+        )
+    }
 
     LaunchedEffect(uiState.isPlanSavedSnackbarShown) {
         if (uiState.isPlanSavedSnackbarShown) {
@@ -126,6 +147,8 @@ fun TradingAppRoot(
             when (uiState.activeTab) {
                 0 -> HomeScreen(
                     symbols = marketSymbols,
+                    defaultRiskAmount = uiState.defaultRiskAmount,
+                    onEditRisk = { showEditRiskDialog = true },
                     onSelectStockAndAnalyze = { symbol, strategy ->
                         viewModel.selectStock(symbol)
                         viewModel.selectStrategy(strategy)
@@ -161,9 +184,11 @@ fun TradingAppRoot(
                     indicatorSettings = uiState.indicatorSettings,
                     selectedTimeframe = uiState.selectedTimeframe,
                     selectedStrategy = uiState.selectedStrategy,
+                    defaultRiskAmount = uiState.defaultRiskAmount,
                     onTimeframeSelected = { viewModel.selectTimeframe(it) },
                     onStrategySelected = { viewModel.selectStrategy(it) },
                     onToggleIndicator = { viewModel.toggleIndicator(it) },
+                    onEditRisk = { showEditRiskDialog = true },
                     onSavePlan = { viewModel.saveCurrentPlan() },
                     onReconnect = { viewModel.reconnect() }
                 )

@@ -28,11 +28,18 @@ fun SettingsScreen(
     onUpdateBackendConfig: (BackendConfig) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var backendUrl by remember { mutableStateOf("https://smartapi-proxy.internal.koushiktrading.ai/api/v1") }
-    var wsUrl by remember { mutableStateOf("wss://smartapi-proxy.internal.koushiktrading.ai/ws/ticks") }
-    var riskAmountText by remember { mutableStateOf(defaultRisk.toInt().toString()) }
-    var selectedRR by remember { mutableStateOf(defaultTargetRR) }
+    var backendUrl by remember { mutableStateOf("https://koushik-trading-ai.onrender.com/api") }
+    var wsUrl by remember { mutableStateOf("wss://koushik-trading-ai.onrender.com/ws/market") }
+    var riskAmountText by remember(defaultRisk) {
+        val initial = if (defaultRisk % 1.0 == 0.0) defaultRisk.toInt().toString() else String.format(java.util.Locale.US, "%.2f", defaultRisk)
+        mutableStateOf(initial)
+    }
+    var riskErrorText by remember { mutableStateOf<String?>(null) }
+    var riskSaveSuccessMessage by remember { mutableStateOf<String?>(null) }
+    var selectedRR by remember(defaultTargetRR) { mutableStateOf(defaultTargetRR) }
     var isSimulatedMode by remember { mutableStateOf(true) }
+
+    val presetAmounts = listOf(500.0, 1000.0, 1500.0, 2500.0, 5000.0)
 
     LazyColumn(
         modifier = modifier
@@ -195,37 +202,223 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = BgCard),
                 border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag("intraday_risk_controls_card")
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(text = "INTRADAY RISK CONTROLS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyanAccent, letterSpacing = 0.8.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "INTRADAY RISK CONTROLS",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CyanAccent,
+                            letterSpacing = 0.8.sp
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = KeyLevelYellowBg,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, KeyLevelYellow.copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = "Active: ₹${if (defaultRisk % 1.0 == 0.0) defaultRisk.toInt() else String.format(java.util.Locale.US, "%.2f", defaultRisk)}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = KeyLevelYellow,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
 
-                    OutlinedTextField(
-                        value = riskAmountText,
-                        onValueChange = {
-                            riskAmountText = it
-                            val r = it.toDoubleOrNull() ?: 2000.0
-                            onUpdateRisk(r, selectedRR)
-                        },
-                        label = { Text("Default Capital Risk per Trade (₹)") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = CyanAccent,
-                            unfocusedBorderColor = BgCardBorder,
-                            focusedContainerColor = BgCardElevated,
-                            unfocusedContainerColor = BgCardElevated
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true,
+                    // Current Active Risk Banner
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = BgCardElevated,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
                         modifier = Modifier.fillMaxWidth()
-                    )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(text = "Current Capital Risk per Trade", fontSize = 10.sp, color = TextSecondary)
+                                Text(
+                                    text = "₹${if (defaultRisk % 1.0 == 0.0) defaultRisk.toInt() else String.format(java.util.Locale.US, "%.2f", defaultRisk)}",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                            }
+                            Text(
+                                text = "Saved Permanently",
+                                fontSize = 9.sp,
+                                color = BullishGreen,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    // Quick Preset Chips
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(text = "Select Preset Risk Amount:", fontSize = 10.sp, color = TextSecondary)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            presetAmounts.forEach { preset ->
+                                val isSel = riskAmountText.toDoubleOrNull() == preset
+                                Surface(
+                                    onClick = {
+                                        riskAmountText = preset.toInt().toString()
+                                        riskErrorText = null
+                                        riskSaveSuccessMessage = null
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isSel) CyanAccent else BgPillInactive,
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (isSel) CyanAccent else BgCardBorder
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(28.dp)
+                                        .testTag("settings_preset_${preset.toInt()}")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "₹${preset.toInt()}",
+                                            fontSize = 10.sp,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSel) Color.White else TextPrimary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Custom Input Field with Validation
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedTextField(
+                            value = riskAmountText,
+                            onValueChange = {
+                                riskAmountText = it
+                                riskErrorText = null
+                                riskSaveSuccessMessage = null
+                            },
+                            label = { Text("Capital Risk per Trade (₹)") },
+                            leadingIcon = {
+                                Text(
+                                    text = "₹",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyanAccent,
+                                    modifier = Modifier.padding(start = 10.dp, end = 2.dp)
+                                )
+                            },
+                            isError = riskErrorText != null,
+                            supportingText = {
+                                if (riskErrorText != null) {
+                                    Text(
+                                        text = riskErrorText!!,
+                                        color = BearishRed,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                } else if (riskSaveSuccessMessage != null) {
+                                    Text(
+                                        text = riskSaveSuccessMessage!!,
+                                        color = BullishGreen,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = CyanAccent,
+                                unfocusedBorderColor = BgCardBorder,
+                                errorBorderColor = BearishRed,
+                                focusedContainerColor = BgCardElevated,
+                                unfocusedContainerColor = BgCardElevated
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_risk_input_field")
+                        )
+
+                        // Save and Cancel Buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val fallback = if (defaultRisk % 1.0 == 0.0) defaultRisk.toInt().toString() else String.format(java.util.Locale.US, "%.2f", defaultRisk)
+                                    riskAmountText = fallback
+                                    riskErrorText = null
+                                    riskSaveSuccessMessage = null
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp)
+                                    .testTag("settings_cancel_risk_button")
+                            ) {
+                                Text(text = "Cancel", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    val trimmed = riskAmountText.trim()
+                                    if (trimmed.isEmpty()) {
+                                        riskErrorText = "Risk amount cannot be empty"
+                                        return@Button
+                                    }
+                                    val r = trimmed.toDoubleOrNull()
+                                    if (r == null) {
+                                        riskErrorText = "Please enter a valid numeric amount"
+                                        return@Button
+                                    }
+                                    if (r <= 0.0) {
+                                        riskErrorText = "Risk amount must be greater than ₹0"
+                                        return@Button
+                                    }
+                                    riskErrorText = null
+                                    onUpdateRisk(r, selectedRR)
+                                    riskSaveSuccessMessage = "Saved ₹${if (r % 1.0 == 0.0) r.toInt() else String.format(java.util.Locale.US, "%.2f", r)} successfully!"
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = CyanAccent,
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp)
+                                    .testTag("settings_save_risk_button")
+                            ) {
+                                Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(text = "Save Risk", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     Text(text = "Minimum Target Risk:Reward Filter:", fontSize = 11.sp, color = TextSecondary)
-                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -235,7 +428,8 @@ fun SettingsScreen(
                             Surface(
                                 onClick = {
                                     selectedRR = rr
-                                    onUpdateRisk(riskAmountText.toDoubleOrNull() ?: 2000.0, rr)
+                                    val currentR = riskAmountText.toDoubleOrNull() ?: defaultRisk
+                                    onUpdateRisk(currentR, rr)
                                 },
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (isSel) CyanAccent else BgPillInactive,

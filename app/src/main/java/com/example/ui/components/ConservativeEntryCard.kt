@@ -23,6 +23,8 @@ import com.example.ui.theme.*
 @Composable
 fun ConservativeEntryCard(
     analysisResult: AnalysisResult,
+    riskAmount: Double = 2500.0,
+    onEditRisk: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedEntryTab by remember { mutableStateOf(2) } // 0: Aggressive, 1: Normal, 2: Conservative
@@ -159,32 +161,129 @@ fun ConservativeEntryCard(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Risk, Reward & RR Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(BgDarkNavy)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Intraday Risk Budget & Position Sizing Section
+                val riskPerShare = kotlin.math.abs(activePlan.entryPrice - activePlan.stopLoss)
+                val calculatedQty = if (riskPerShare > 0.05) {
+                    (riskAmount / riskPerShare).toInt().coerceAtLeast(1)
+                } else 1
+                val totalRiskAtSL = calculatedQty * riskPerShare
+                val reward1PerShare = kotlin.math.abs(activePlan.target1 - activePlan.entryPrice)
+                val reward2PerShare = kotlin.math.abs(activePlan.target2 - activePlan.entryPrice)
+                val totalRewardAtT1 = calculatedQty * reward1PerShare
+                val totalRewardAtT2 = calculatedQty * reward2PerShare
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = BgCardElevated,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
+                    modifier = Modifier.fillMaxWidth().testTag("intraday_risk_position_sizing_section")
                 ) {
-                    Column {
-                        Text(text = "Risk (100 qty):", fontSize = 10.sp, color = TextSecondary)
-                        Text(text = "₹${activePlan.riskRupees}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BearishRed)
-                    }
-                    Column {
-                        Text(text = "Potential Reward:", fontSize = 10.sp, color = TextSecondary)
-                        Text(text = "₹${activePlan.potentialRewardRupees}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BullishGreen)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(text = "Risk : Reward", fontSize = 10.sp, color = TextSecondary)
-                        Text(
-                            text = "1 : ${activePlan.riskRewardRatio}",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (activePlan.riskRewardRatio >= 1.5) BullishGreen else OrangeWarning
-                        )
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Risk Budget Header with Edit Action
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountBalanceWallet,
+                                    contentDescription = null,
+                                    tint = KeyLevelYellow,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "INTRADAY RISK BUDGET:",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextSecondary,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Text(
+                                    text = "₹${if (riskAmount % 1.0 == 0.0) riskAmount.toInt() else String.format(java.util.Locale.US, "%.2f", riskAmount)}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = KeyLevelYellow
+                                )
+                            }
+
+                            if (onEditRisk != null) {
+                                Surface(
+                                    onClick = onEditRisk,
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = CyanAccentBg,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.4f)),
+                                    modifier = Modifier.testTag("edit_risk_button_in_card")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Edit Risk",
+                                            tint = CyanAccent,
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Text(
+                                            text = "Edit Risk",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = CyanAccent
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Calculated Position Sizing Metrics Grid
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(BgDarkNavy)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(text = "Recommended Qty", fontSize = 9.sp, color = TextSecondary)
+                                Text(
+                                    text = "$calculatedQty shares",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyanAccent
+                                )
+                            }
+                            Column {
+                                Text(text = "Total Risk @ SL", fontSize = 9.sp, color = TextSecondary)
+                                Text(
+                                    text = "₹${String.format(java.util.Locale.US, "%.1f", totalRiskAtSL)}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BearishRed
+                                )
+                            }
+                            Column {
+                                Text(text = "Profit @ T1", fontSize = 9.sp, color = TextSecondary)
+                                Text(
+                                    text = "+₹${String.format(java.util.Locale.US, "%.1f", totalRewardAtT1)}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BullishGreen
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(text = "Risk : Reward", fontSize = 9.sp, color = TextSecondary)
+                                Text(
+                                    text = "1 : ${activePlan.riskRewardRatio}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (activePlan.riskRewardRatio >= 1.5) BullishGreen else OrangeWarning
+                                )
+                            }
+                        }
                     }
                 }
 

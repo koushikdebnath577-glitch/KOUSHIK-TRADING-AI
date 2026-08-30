@@ -37,9 +37,11 @@ fun AnalyzeScreen(
     indicatorSettings: TradingRepository.IndicatorSettings,
     selectedTimeframe: Timeframe,
     selectedStrategy: StrategyType,
+    defaultRiskAmount: Double = 2500.0,
     onTimeframeSelected: (Timeframe) -> Unit,
     onStrategySelected: (StrategyType) -> Unit,
     onToggleIndicator: (String) -> Unit,
+    onEditRisk: () -> Unit = {},
     onSavePlan: () -> Unit,
     onReconnect: () -> Unit,
     modifier: Modifier = Modifier
@@ -109,6 +111,65 @@ fun AnalyzeScreen(
                 if (analysisResult != null) {
                     StrategyStatusBanner(analysisResult = analysisResult)
                 }
+
+                // Intraday Risk Quick Access Pill
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = BgCard,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
+                    modifier = Modifier.fillMaxWidth().testTag("analyze_risk_quick_bar")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = KeyLevelYellow,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(text = "Intraday Risk:", fontSize = 11.sp, color = TextSecondary)
+                            Text(
+                                text = "₹${if (defaultRiskAmount % 1.0 == 0.0) defaultRiskAmount.toInt() else String.format(java.util.Locale.US, "%.2f", defaultRiskAmount)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = KeyLevelYellow
+                            )
+                        }
+
+                        Surface(
+                            onClick = onEditRisk,
+                            shape = RoundedCornerShape(6.dp),
+                            color = CyanAccentBg,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
+                            modifier = Modifier.testTag("analyze_edit_risk_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit Risk",
+                                    tint = CyanAccent,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = "Edit Risk",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyanAccent
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -150,7 +211,11 @@ fun AnalyzeScreen(
         // 7. Conservative Entry Assistant Card (Aggressive / Normal / Conservative)
         if (analysisResult != null) {
             item {
-                ConservativeEntryCard(analysisResult = analysisResult)
+                ConservativeEntryCard(
+                    analysisResult = analysisResult,
+                    riskAmount = defaultRiskAmount,
+                    onEditRisk = onEditRisk
+                )
             }
         }
 
@@ -194,6 +259,8 @@ fun AnalyzeScreen(
             item {
                 TradePlanPanel(
                     analysisResult = analysisResult,
+                    riskAmount = defaultRiskAmount,
+                    onEditRisk = onEditRisk,
                     onSavePlan = onSavePlan
                 )
             }

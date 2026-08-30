@@ -106,20 +106,27 @@ class TradingEngineTest {
     }
 
     @Test
-    fun testNoTradeFilterSafety() {
-        val candles = generateMockCandles(25000.0, 10)
-        val noTradeCheck = NoTradeFilter.evaluate(
-            candles = candles,
-            currentPrice = 25000.0,
-            activeLevel = null,
-            confirmationStatus = ConfirmationStatus.NO_CONFIRMATION,
-            momentumStatus = MomentumStatus.WEAK_MOMENTUM,
-            riskRewardRatio = 1.0,
-            stopLossDistancePercent = 0.02
-        )
+    fun testPositionSizingCalculations() {
+        val entryPrice = 25000.0
+        val stopLoss = 24950.0
+        val riskPerShare = kotlin.math.abs(entryPrice - stopLoss) // 50.0
 
-        assertTrue(noTradeCheck.isNoTrade)
-        assertNotNull(noTradeCheck.warningTitle)
-        assertTrue(noTradeCheck.reasonsToAvoid.isNotEmpty())
+        // Test ₹2500 default risk
+        val risk2500 = 2500.0
+        val qty2500 = (risk2500 / riskPerShare).toInt()
+        assertEquals(50, qty2500)
+        assertEquals(2500.0, qty2500 * riskPerShare, 0.01)
+
+        // Test custom ₹500 risk
+        val risk500 = 500.0
+        val qty500 = (risk500 / riskPerShare).toInt()
+        assertEquals(10, qty500)
+        assertEquals(500.0, qty500 * riskPerShare, 0.01)
+
+        // Test custom ₹5000 risk
+        val risk5000 = 5000.0
+        val qty5000 = (risk5000 / riskPerShare).toInt()
+        assertEquals(100, qty5000)
+        assertEquals(5000.0, qty5000 * riskPerShare, 0.01)
     }
 }

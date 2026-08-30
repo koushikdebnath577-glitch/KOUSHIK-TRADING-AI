@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import android.util.Log
 import com.example.data.model.Candle
 import com.example.data.model.ConnectionStatus
 import com.example.data.model.StockSymbol
@@ -11,8 +12,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.text.SimpleDateFormat
-import java.util.*
+import okhttp3.*
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 data class LiveTick(
@@ -24,18 +27,31 @@ data class LiveTick(
 )
 
 data class BackendConfig(
-    val serverUrl: String = "https://smartapi-proxy.internal.koushiktrading.ai/api/v1",
-    val wsUrl: String = "wss://smartapi-proxy.internal.koushiktrading.ai/ws/ticks",
-    val isSimulated: Boolean = true,
+    val serverUrl: String = "https://koushik-trading-ai.onrender.com/api",
+    val wsUrl: String = "wss://koushik-trading-ai.onrender.com/ws/market",
+    val isSimulated: Boolean = false,
     val isConnected: Boolean = true,
-    val useLiveBackend: Boolean = false,
+    val useLiveBackend: Boolean = true,
     val clientIp: String = "192.168.1.1",
     val macAddress: String = "00:1A:2B:3C:4D:5E"
-)
+) {
+    val healthUrl: String
+        get() {
+            val base = if (serverUrl.endsWith("/api")) serverUrl.removeSuffix("/api") else serverUrl
+            return "$base/health"
+        }
+}
 
 class SmartApiBackendClient {
 
-    private val _connectionStatus = MutableStateFlow(ConnectionStatus.LIVE)
+    companion object {
+        private const val TAG = "SmartApiBackendClient"
+        const val DEFAULT_API_BASE_URL = "https://koushik-trading-ai.onrender.com/api"
+        const val DEFAULT_WS_URL = "wss://koushik-trading-ai.onrender.com/ws/market"
+        const val DEFAULT_HEALTH_URL = "https://koushik-trading-ai.onrender.com/health"
+    }
+
+    private val _connectionStatus = MutableStateFlow(ConnectionStatus.CONNECTING)
     val connectionStatus: StateFlow<ConnectionStatus> = _connectionStatus.asStateFlow()
 
     private val _tickFlow = MutableSharedFlow<LiveTick>(extraBufferCapacity = 64)
@@ -45,15 +61,28 @@ class SmartApiBackendClient {
     val marketSymbols: StateFlow<List<StockSymbol>> = _marketSymbols.asStateFlow()
 
     private var backendConfig = BackendConfig()
-    private var simulationJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // OkHttp Client with WebSocket and REST support
+    private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+
+    private var webSocket: WebSocket? = null
+    private var reconnectJob: Job? = null
+    private var simulationFallbackJob: Job? = null
+    private var isWebSocketActive = false
 
     // In-memory cache of candle history per symbol + timeframe
     private val candleCache = mutableMapOf<String, MutableList<Candle>>()
 
     init {
         initializeSymbols()
-        startLiveFeed()
+        startConnectionLifecycle()
     }
 
     private fun initializeSymbols() {
@@ -79,41 +108,296 @@ class SmartApiBackendClient {
         reconnect()
     }
 
+    /**
+     * Trigger explicit reconnection or retry loop
+     */
     fun reconnect() {
         scope.launch {
-            _connectionStatus.value = ConnectionStatus.RECONNECTING
-            delay(1200)
-            _connectionStatus.value = ConnectionStatus.LIVE
+            _connectionStatus.value = ConnectionStatus.CONNECTING
+            closeWebSocket()
+            delay(500)
+            connectToBackend()
         }
     }
 
-    private fun startLiveFeed() {
-        simulationJob?.cancel()
-        simulationJob = scope.launch {
-            while (isActive) {
-                if (_connectionStatus.value == ConnectionStatus.LIVE) {
-                    val currentList = _marketSymbols.value.toMutableList()
+    private fun startConnectionLifecycle() {
+        scope.launch {
+            connectToBackend()
+        }
+    }
+
+    /**
+     * 1. Performs GET /health check
+     * 2. Establishes WebSocket connection to /ws/market
+     * 3. Starts automatic reconnection if network drops
+     */
+    private suspend fun connectToBackend() {
+        _connectionStatus.value = ConnectionStatus.CONNECTING
+        Log.d(TAG, "Connecting to Render backend: ${backendConfig.serverUrl} and WS: ${backendConfig.wsUrl}")
+
+        // 1. Perform Health Check
+        val isHealthOk = performHealthCheck()
+        Log.d(TAG, "Health check result: $isHealthOk")
+
+        // 2. Establish WebSocket connection
+        startWebSocket()
+    }
+
+    /**
+     * Calls GET /health on the deployed backend
+     */
+    private suspend fun performHealthCheck(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(backendConfig.healthUrl)
+                .get()
+                .build()
+
+            okHttpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    Log.d(TAG, "Health Check Success: $body")
+                    true
+                } else {
+                    Log.w(TAG, "Health Check HTTP ${response.code}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Health Check Exception: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Connects to WebSocket endpoint: wss://koushik-trading-ai.onrender.com/ws/market
+     */
+    private fun startWebSocket() {
+        closeWebSocket()
+
+        try {
+            val request = Request.Builder()
+                .url(backendConfig.wsUrl)
+                .build()
+
+            webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    Log.d(TAG, "WebSocket Connected successfully to ${backendConfig.wsUrl}")
+                    isWebSocketActive = true
+                    _connectionStatus.value = ConnectionStatus.CONNECTED
+                    stopSimulationFallback()
+
+                    // Send subscription payload for all monitored tokens
+                    val tokensJson = JSONArray()
+                    _marketSymbols.value.forEach { tokensJson.put(it.token) }
+
+                    val subPayload = JSONObject().apply {
+                        put("action", "subscribe")
+                        put("exchangeType", 1)
+                        put("tokens", tokensJson)
+                    }
+
+                    webSocket.send(subPayload.toString())
+                    Log.d(TAG, "Sent subscription payload for ${_marketSymbols.value.size} tokens")
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    handleIncomingWebSocketMessage(text)
+                }
+
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.w(TAG, "WebSocket Closing: $code - $reason")
+                    isWebSocketActive = false
+                    _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                    scheduleAutomaticReconnect()
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.w(TAG, "WebSocket Closed: $code - $reason")
+                    isWebSocketActive = false
+                    _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                    scheduleAutomaticReconnect()
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    Log.e(TAG, "WebSocket Failure: ${t.message}. Response: ${response?.code}")
+                    isWebSocketActive = false
+                    _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                    startSimulationFallback()
+                    scheduleAutomaticReconnect()
+                }
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "WebSocket Connection Exception: ${e.message}")
+            isWebSocketActive = false
+            _connectionStatus.value = ConnectionStatus.DISCONNECTED
+            startSimulationFallback()
+            scheduleAutomaticReconnect()
+        }
+    }
+
+    private fun handleIncomingWebSocketMessage(text: String) {
+        try {
+            val json = JSONObject(text)
+            val type = json.optString("type", "")
+
+            when (type) {
+                "tick" -> {
+                    val token = json.optString("token", "")
+                    val symbol = json.optString("symbol", "")
+                    val ltp = json.optDouble("ltp", 0.0)
+                    val change = json.optDouble("change", 0.0)
+                    val changePercent = json.optDouble("changePercent", 0.0)
+                    val volume = json.optLong("volume", 0L)
+                    val timestamp = json.optLong("timestamp", System.currentTimeMillis())
+
+                    if (token.isNotEmpty() && ltp > 0) {
+                        updateSymbolFromTick(token, symbol, ltp, change, changePercent, volume, timestamp)
+                    }
+                }
+                "candle" -> {
+                    val token = json.optString("token", "")
+                    val interval = json.optString("interval", "1s")
+                    val candleObj = json.optJSONObject("candle")
+                    if (candleObj != null) {
+                        val c = Candle(
+                            timestamp = candleObj.optLong("timestamp", System.currentTimeMillis()),
+                            open = candleObj.optDouble("open", 0.0),
+                            high = candleObj.optDouble("high", 0.0),
+                            low = candleObj.optDouble("low", 0.0),
+                            close = candleObj.optDouble("close", 0.0),
+                            volume = candleObj.optLong("volume", 0L),
+                            isComplete = candleObj.optBoolean("isComplete", false)
+                        )
+                        // If token matches any symbol, update candle
+                        val stock = _marketSymbols.value.find { it.token == token }
+                        if (stock != null) {
+                            val tf = when (interval.lowercase()) {
+                                "1s" -> Timeframe.SEC_1
+                                "5s" -> Timeframe.SEC_5
+                                "15s" -> Timeframe.SEC_15
+                                "30s" -> Timeframe.SEC_30
+                                else -> Timeframe.MIN_1
+                            }
+                            updateLastCandle(stock.symbol, tf, c)
+                        }
+                    }
+                }
+                "connection" -> {
+                    Log.d(TAG, "Backend Handshake: ${json.optString("service")}")
+                    _connectionStatus.value = ConnectionStatus.CONNECTED
+                }
+                "subscribed" -> {
+                    Log.d(TAG, "Backend Subscription Confirmed: ${json.optJSONArray("tokens")?.length()} tokens")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing WS message: ${e.message}")
+        }
+    }
+
+    private fun updateSymbolFromTick(
+        token: String,
+        symbol: String,
+        ltp: Double,
+        change: Double,
+        changePercent: Double,
+        volume: Long,
+        timestamp: Long
+    ) {
+        val currentList = _marketSymbols.value.toMutableList()
+        val index = currentList.indexOfFirst { it.token == token || it.symbol == symbol }
+
+        if (index >= 0) {
+            val stock = currentList[index]
+            val actualChange = if (change != 0.0) change else (ltp - stock.previousClose)
+            val actualChangePct = if (changePercent != 0.0) changePercent else ((actualChange / stock.previousClose) * 100.0)
+            val newHigh = kotlin.math.max(stock.high, ltp)
+            val newLow = kotlin.math.min(stock.low, ltp)
+
+            val updatedStock = stock.copy(
+                ltp = ltp,
+                change = kotlin.math.round(actualChange * 100.0) / 100.0,
+                changePercent = kotlin.math.round(actualChangePct * 100.0) / 100.0,
+                high = newHigh,
+                low = newLow,
+                volume = stock.volume + volume,
+                lastUpdated = timestamp
+            )
+            currentList[index] = updatedStock
+            _marketSymbols.value = currentList
+
+            // Emit live tick for indicators, key levels, and analysis engine
+            scope.launch {
+                _tickFlow.emit(
+                    LiveTick(
+                        token = token,
+                        symbol = stock.symbol,
+                        ltp = ltp,
+                        volume = volume,
+                        timestamp = timestamp
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Automatically reconnects if backend or network drops
+     */
+    private fun scheduleAutomaticReconnect() {
+        if (reconnectJob?.isActive == true) return
+
+        reconnectJob = scope.launch {
+            Log.d(TAG, "Scheduling automatic reconnection in 3 seconds...")
+            delay(3000)
+            if (!isWebSocketActive) {
+                _connectionStatus.value = ConnectionStatus.CONNECTING
+                connectToBackend()
+            }
+        }
+    }
+
+    private fun closeWebSocket() {
+        try {
+            webSocket?.close(1000, "Client Reset")
+            webSocket = null
+            isWebSocketActive = false
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
+    /**
+     * Standby fallback generator: ensures charts, indicators, and strategy scores
+     * remain fluid and responsive while the backend connection is establishing.
+     */
+    private fun startSimulationFallback() {
+        if (simulationFallbackJob?.isActive == true) return
+
+        simulationFallbackJob = scope.launch {
+            while (isActive && !isWebSocketActive) {
+                val currentList = _marketSymbols.value.toMutableList()
+                if (currentList.isNotEmpty()) {
                     val index = Random.nextInt(currentList.size)
                     val stock = currentList[index]
 
-                    // Calculate tick delta based on volatility
-                    val volatility = stock.ltp * 0.0008
-                    val delta = (Random.nextDouble(-volatility, volatility * 1.02))
+                    val volatility = stock.ltp * 0.0006
+                    val delta = Random.nextDouble(-volatility, volatility * 1.02)
                     val newPrice = kotlin.math.round((stock.ltp + delta) * 100.0) / 100.0
                     val newChange = newPrice - stock.previousClose
                     val newChangePercent = (newChange / stock.previousClose) * 100.0
                     val newHigh = kotlin.math.max(stock.high, newPrice)
                     val newLow = kotlin.math.min(stock.low, newPrice)
-                    val tickVol = Random.nextLong(100, 2500)
-                    val newVolume = stock.volume + tickVol
+                    val tickVol = Random.nextLong(100, 2000)
 
                     val updatedStock = stock.copy(
                         ltp = newPrice,
-                        change = newChange,
-                        changePercent = newChangePercent,
+                        change = kotlin.math.round(newChange * 100.0) / 100.0,
+                        changePercent = kotlin.math.round(newChangePercent * 100.0) / 100.0,
                         high = newHigh,
                         low = newLow,
-                        volume = newVolume,
+                        volume = stock.volume + tickVol,
                         lastUpdated = System.currentTimeMillis()
                     )
                     currentList[index] = updatedStock
@@ -129,15 +413,18 @@ class SmartApiBackendClient {
                         )
                     )
                 }
-                // High frequency tick pace (between 250ms and 750ms for realistic intraday dynamics)
-                delay(Random.nextLong(250, 750))
+                delay(Random.nextLong(400, 800))
             }
         }
     }
 
+    private fun stopSimulationFallback() {
+        simulationFallbackJob?.cancel()
+        simulationFallbackJob = null
+    }
+
     /**
      * Retrieves historical candle data for a symbol and timeframe.
-     * Uses in-memory cache to prevent repeated historical requests.
      */
     fun getHistoricalCandles(symbol: String, timeframe: Timeframe, count: Int = 120): List<Candle> {
         val cacheKey = "${symbol}_${timeframe.name}"
@@ -164,16 +451,12 @@ class SmartApiBackendClient {
         val now = System.currentTimeMillis()
         var price = currentPrice * (1.0 - (Random.nextDouble(0.005, 0.015)))
 
-        // Form an opening range in earlier candles
-        val orHigh = price * 1.008
-        val orLow = price * 0.994
         val resistanceLevel = price * 1.012
 
         for (i in count downTo 1) {
             val candleTime = now - (i * intervalMs)
             val open = price
 
-            // Market drift simulation with resistance rejections near the top
             val drift = if (price >= resistanceLevel * 0.998) {
                 Random.nextDouble(-0.003, 0.0005) // strong rejection bias at resistance
             } else if (i in (count - 15)..(count - 5)) {
@@ -202,7 +485,6 @@ class SmartApiBackendClient {
             price = close
         }
 
-        // Adjust the last candle close to current LTP
         if (candles.isNotEmpty()) {
             val last = candles.last()
             val adjustedLast = last.copy(
