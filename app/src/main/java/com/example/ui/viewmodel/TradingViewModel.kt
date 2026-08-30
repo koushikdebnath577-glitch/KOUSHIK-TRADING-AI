@@ -150,6 +150,10 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(searchQuery = query) }
     }
 
+    suspend fun searchStocks(query: String): List<com.example.data.model.StockSearchResult> {
+        return repository.searchStocks(query)
+    }
+
     fun toggleWatchlist(symbol: String, name: String, token: String) {
         viewModelScope.launch {
             repository.toggleWatchlist(symbol, name, token)

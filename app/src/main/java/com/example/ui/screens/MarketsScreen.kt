@@ -19,8 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.WatchlistEntity
+import com.example.data.model.StockSearchResult
 import com.example.data.model.StockSymbol
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
 
 @Composable
 fun MarketsScreen(
@@ -30,17 +32,38 @@ fun MarketsScreen(
     onSearchQueryChange: (String) -> Unit,
     onStockSelected: (String) -> Unit,
     onToggleWatchlist: (String, String, String) -> Unit,
+    onSearchScripMaster: (suspend (String) -> List<StockSearchResult>)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedFilter by remember { mutableStateOf("ALL") }
+    var scripMasterResults by remember { mutableStateOf<List<StockSearchResult>>(emptyList()) }
+    var isSearchingScripMaster by remember { mutableStateOf(false) }
 
     val watchlistSymbols = remember(watchlist) { watchlist.map { it.symbol }.toSet() }
+
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isNotBlank() && onSearchScripMaster != null) {
+            delay(300)
+            isSearchingScripMaster = true
+            try {
+                scripMasterResults = onSearchScripMaster(searchQuery)
+            } catch (_: Exception) {
+                scripMasterResults = emptyList()
+            } finally {
+                isSearchingScripMaster = false
+            }
+        } else {
+            scripMasterResults = emptyList()
+            isSearchingScripMaster = false
+        }
+    }
 
     val filteredSymbols = remember(symbols, searchQuery, selectedFilter) {
         val base = if (searchQuery.isBlank()) symbols else {
             symbols.filter {
                 it.symbol.contains(searchQuery, ignoreCase = true) ||
-                it.companyName.contains(searchQuery, ignoreCase = true)
+                it.companyName.contains(searchQuery, ignoreCase = true) ||
+                it.token.contains(searchQuery)
             }
         }
         when (selectedFilter) {
@@ -252,6 +275,124 @@ fun MarketsScreen(
                                 modifier = Modifier.height(28.dp)
                             ) {
                                 Text(text = "Analyze", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Scrip Master Live Search Results
+            if (searchQuery.isNotBlank()) {
+                val existingSymbols = filteredSymbols.map { it.symbol }.toSet()
+                val additionalScrips = scripMasterResults.filter {
+                    val clean = it.symbol.removeSuffix("-EQ")
+                    !existingSymbols.contains(clean) && !existingSymbols.contains(it.symbol)
+                }
+
+                if (isSearchingScripMaster) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                color = CyanAccent,
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Searching Angel One Scrip Master...", fontSize = 11.sp, color = TextTertiary)
+                        }
+                    }
+                } else if (additionalScrips.isNotEmpty()) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "ANGEL ONE SCRIP MASTER RESULTS (${additionalScrips.size})",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CyanAccent
+                            )
+                        }
+                    }
+
+                    items(additionalScrips, key = { "scrip_${it.token}_${it.symbol}" }) { scrip ->
+                        val cleanSym = scrip.symbol.removeSuffix("-EQ")
+                        val isStarred = watchlistSymbols.contains(cleanSym) || watchlistSymbols.contains(scrip.symbol)
+
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = BgCardElevated),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            text = scrip.symbol,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary
+                                        )
+                                        Surface(shape = RoundedCornerShape(3.dp), color = BgDarkNavy) {
+                                            Text(
+                                                text = "${scrip.exchange} • Token ${scrip.token}",
+                                                fontSize = 8.sp,
+                                                color = CyanAccent,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = scrip.name,
+                                        fontSize = 11.sp,
+                                        color = TextSecondary,
+                                        maxLines = 1
+                                    )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = { onToggleWatchlist(cleanSym, scrip.name, scrip.token) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isStarred) Icons.Default.Star else Icons.Default.StarBorder,
+                                            contentDescription = "Watchlist",
+                                            tint = if (isStarred) KeyLevelYellow else TextTertiary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    Button(
+                                        onClick = { onStockSelected(cleanSym) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.White),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text(text = "Analyze", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }

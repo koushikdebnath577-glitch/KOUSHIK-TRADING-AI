@@ -52,6 +52,14 @@ data class StockSymbol(
     val dayLow: Double get() = low
 }
 
+data class StockSearchResult(
+    val name: String,
+    val symbol: String,
+    val token: String,
+    val exchange: String = "NSE",
+    val instrumentType: String = "EQ"
+)
+
 enum class KeyLevelType(val displayName: String, val colorHex: Long) {
     DAY_HIGH("Day High", 0xFFFF5252),
     DAY_LOW("Day Low", 0xFF00E676),

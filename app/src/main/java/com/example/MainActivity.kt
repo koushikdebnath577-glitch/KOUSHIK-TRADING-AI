@@ -168,6 +168,9 @@ fun TradingAppRoot(
                     },
                     onToggleWatchlist = { symbol, name, token ->
                         viewModel.toggleWatchlist(symbol, name, token)
+                    },
+                    onSearchScripMaster = { query ->
+                        viewModel.searchStocks(query)
                     }
                 )
                 2 -> AnalyzeScreen(
@@ -203,6 +206,12 @@ fun TradingAppRoot(
                     },
                     onRemoveFromWatchlist = { symbol ->
                         viewModel.toggleWatchlist(symbol, "", "")
+                    },
+                    onAddToWatchlist = { symbol, name, token ->
+                        viewModel.toggleWatchlist(symbol, name, token)
+                    },
+                    onSearchScripMaster = { query ->
+                        viewModel.searchStocks(query)
                     },
                     onDeleteSavedPlan = { planId ->
                         viewModel.deleteSavedPlan(planId)

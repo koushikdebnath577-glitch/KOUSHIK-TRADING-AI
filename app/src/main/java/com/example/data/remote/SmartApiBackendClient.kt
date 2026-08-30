@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.data.model.Candle
 import com.example.data.model.ConnectionStatus
 import com.example.data.model.StockSymbol
+import com.example.data.model.StockSearchResult
 import com.example.data.model.Timeframe
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -515,5 +516,84 @@ class SmartApiBackendClient {
             list.removeAt(0)
         }
         candleCache[cacheKey] = list
+    }
+
+    /**
+     * Searches Angel One Scrip Master database via backend GET /api/search?q=query
+     */
+    suspend fun searchStocks(query: String): List<StockSearchResult> = withContext(Dispatchers.IO) {
+        val trimmedQuery = query.trim()
+        if (trimmedQuery.isEmpty()) {
+            return@withContext _marketSymbols.value.map {
+                StockSearchResult(
+                    name = it.name,
+                    symbol = it.symbol,
+                    token = it.token,
+                    exchange = it.exchange,
+                    instrumentType = "EQ"
+                )
+            }
+        }
+
+        try {
+            val base = if (backendConfig.serverUrl.endsWith("/api")) {
+                backendConfig.serverUrl
+            } else {
+                "${backendConfig.serverUrl}/api"
+            }
+            val encodedQuery = java.net.URLEncoder.encode(trimmedQuery, "UTF-8")
+            val url = "$base/search?q=$encodedQuery&limit=50"
+
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bodyStr = response.body?.string()
+                if (!bodyStr.isNullOrBlank()) {
+                    val json = JSONObject(bodyStr)
+                    val resultsArray = json.optJSONArray("results") ?: json.optJSONArray("data") ?: JSONArray()
+
+                    val results = mutableListOf<StockSearchResult>()
+                    for (i in 0 until resultsArray.length()) {
+                        val item = resultsArray.optJSONObject(i) ?: continue
+                        results.add(
+                            StockSearchResult(
+                                name = item.optString("name", item.optString("symbol", "")),
+                                symbol = item.optString("symbol", ""),
+                                token = item.optString("token", ""),
+                                exchange = item.optString("exchange", "NSE"),
+                                instrumentType = item.optString("instrumentType", item.optString("instrumenttype", "EQ"))
+                            )
+                        )
+                    }
+
+                    if (results.isNotEmpty()) {
+                        return@withContext results
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Backend search failed (${e.message}), falling back to local list")
+        }
+
+        // Fallback to local filtering
+        return@withContext _marketSymbols.value
+            .filter {
+                it.symbol.contains(trimmedQuery, ignoreCase = true) ||
+                it.name.contains(trimmedQuery, ignoreCase = true) ||
+                it.token.contains(trimmedQuery)
+            }
+            .map {
+                StockSearchResult(
+                    name = it.name,
+                    symbol = it.symbol,
+                    token = it.token,
+                    exchange = it.exchange,
+                    instrumentType = "EQ"
+                )
+            }
     }
 }

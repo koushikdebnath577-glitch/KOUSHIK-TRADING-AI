@@ -218,4 +218,8 @@ class TradingRepository(
     fun updateBackendConfig(config: BackendConfig) {
         smartApiClient.updateConfig(config)
     }
+
+    suspend fun searchStocks(query: String): List<com.example.data.model.StockSearchResult> {
+        return smartApiClient.searchStocks(query)
+    }
 }

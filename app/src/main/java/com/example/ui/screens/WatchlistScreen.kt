@@ -2,9 +2,12 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -21,8 +24,12 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.AlertEntity
 import com.example.data.local.SavedPlanEntity
 import com.example.data.local.WatchlistEntity
+import com.example.data.model.StockSearchResult
 import com.example.data.model.StockSymbol
 import com.example.ui.theme.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -34,6 +41,8 @@ fun WatchlistScreen(
     alerts: List<AlertEntity>,
     onSelectStock: (String) -> Unit,
     onRemoveFromWatchlist: (String) -> Unit,
+    onAddToWatchlist: (String, String, String) -> Unit = { _, _, _ -> },
+    onSearchScripMaster: suspend (String) -> List<StockSearchResult> = { emptyList() },
     onDeleteSavedPlan: (String) -> Unit,
     onToggleAlert: (String, Boolean) -> Unit,
     onDeleteAlert: (String) -> Unit,
@@ -42,6 +51,7 @@ fun WatchlistScreen(
 ) {
     var selectedTab by remember { mutableStateOf(0) } // 0: Watchlist, 1: Saved Plans, 2: Active Alerts
     var showCreateAlertDialog by remember { mutableStateOf(false) }
+    var showSearchDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -72,7 +82,14 @@ fun WatchlistScreen(
                 )
             }
 
-            if (selectedTab == 2) {
+            if (selectedTab == 0) {
+                IconButton(
+                    onClick = { showSearchDialog = true },
+                    modifier = Modifier.size(36.dp).testTag("add_stock_watchlist_button")
+                ) {
+                    Icon(imageVector = Icons.Default.AddCircle, contentDescription = "Add Stock", tint = CyanAccent)
+                }
+            } else if (selectedTab == 2) {
                 IconButton(
                     onClick = { showCreateAlertDialog = true },
                     modifier = Modifier.size(36.dp)
@@ -106,7 +123,8 @@ fun WatchlistScreen(
                 watchlist = watchlist,
                 marketSymbols = marketSymbols,
                 onSelectStock = onSelectStock,
-                onRemove = onRemoveFromWatchlist
+                onRemove = onRemoveFromWatchlist,
+                onOpenSearch = { showSearchDialog = true }
             )
             1 -> SavedPlansContent(
                 plans = savedPlans,
@@ -119,6 +137,21 @@ fun WatchlistScreen(
                 onDeleteAlert = onDeleteAlert
             )
         }
+    }
+
+    if (showSearchDialog) {
+        SearchScripMasterDialog(
+            watchlist = watchlist,
+            onDismiss = { showSearchDialog = false },
+            onSearch = onSearchScripMaster,
+            onAddToWatchlist = { symbol, name, token ->
+                onAddToWatchlist(symbol, name, token)
+            },
+            onAnalyzeStock = { symbol ->
+                showSearchDialog = false
+                onSelectStock(symbol)
+            }
+        )
     }
 
     if (showCreateAlertDialog) {
@@ -163,16 +196,83 @@ private fun WatchlistContent(
     watchlist: List<WatchlistEntity>,
     marketSymbols: List<StockSymbol>,
     onSelectStock: (String) -> Unit,
-    onRemove: (String) -> Unit
+    onRemove: (String) -> Unit,
+    onOpenSearch: () -> Unit
 ) {
     if (watchlist.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(text = "No stocks in watchlist. Star stocks in Markets to add.", color = TextTertiary, fontSize = 12.sp)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = "Search",
+                tint = CyanAccent.copy(alpha = 0.6f),
+                modifier = Modifier.size(48.dp)
+            )
+            Text(
+                text = "No stocks in watchlist yet",
+                color = TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Search official Angel One Scrip Master to add NSE Equities",
+                color = TextTertiary,
+                fontSize = 12.sp
+            )
+            Button(
+                onClick = onOpenSearch,
+                colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("empty_watchlist_search_button")
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Search Angel One Scrip Master", fontWeight = FontWeight.Bold)
+            }
         }
         return
     }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(BgCardElevated)
+                    .clickable { onOpenSearch() }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Search, contentDescription = "Search", tint = CyanAccent, modifier = Modifier.size(16.dp))
+                    Text(
+                        text = "Search Angel One Scrip Master (e.g. HDFC, RELIANCE, TATA...)",
+                        fontSize = 11.sp,
+                        color = TextTertiary
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = CyanAccent.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        text = "+ ADD",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CyanAccent,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+
         items(watchlist, key = { it.symbol }) { item ->
             val liveStock = marketSymbols.find { it.symbol == item.symbol }
             val ltp = liveStock?.ltp ?: 0.0
@@ -446,6 +546,294 @@ private fun CreateAlertDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) }
         },
+        containerColor = BgCardElevated
+    )
+}
+
+@Composable
+private fun SearchScripMasterDialog(
+    watchlist: List<WatchlistEntity>,
+    onDismiss: () -> Unit,
+    onSearch: suspend (String) -> List<StockSearchResult>,
+    onAddToWatchlist: (String, String, String) -> Unit,
+    onAnalyzeStock: (String) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<StockSearchResult>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+
+    val quickQueries = listOf("HDFC", "RELIANCE", "TATA", "INFY", "SBIN", "ITC")
+
+    LaunchedEffect(Unit) {
+        isSearching = true
+        searchResults = onSearch("")
+        isSearching = false
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "ANGEL ONE SCRIP MASTER",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Black,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "Search NSE Equities & Tradable Instruments",
+                        fontSize = 10.sp,
+                        color = CyanAccent
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = TextTertiary)
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Search Input Field
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { newQuery ->
+                        searchQuery = newQuery
+                        searchJob?.cancel()
+                        searchJob = scope.launch {
+                            delay(250) // Debounce typing
+                            isSearching = true
+                            searchResults = onSearch(newQuery)
+                            isSearching = false
+                        }
+                    },
+                    placeholder = {
+                        Text(
+                            text = "Search symbol / stock name...",
+                            fontSize = 12.sp,
+                            color = TextTertiary
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = CyanAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = {
+                                searchQuery = ""
+                                scope.launch {
+                                    isSearching = true
+                                    searchResults = onSearch("")
+                                    isSearching = false
+                                }
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextTertiary, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("scrip_master_search_input"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyanAccent,
+                        unfocusedBorderColor = BgCardBorder,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedContainerColor = BgDarkNavy,
+                        unfocusedContainerColor = BgDarkNavy
+                    ),
+                    singleLine = true
+                )
+
+                // Quick Filter Chips
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    quickQueries.forEach { chipText ->
+                        Surface(
+                            onClick = {
+                                searchQuery = chipText
+                                scope.launch {
+                                    isSearching = true
+                                    searchResults = onSearch(chipText)
+                                    isSearching = false
+                                }
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (searchQuery.equals(chipText, ignoreCase = true)) CyanAccent else BgCard,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (searchQuery.equals(chipText, ignoreCase = true)) CyanAccent else BgCardBorder
+                            )
+                        ) {
+                            Text(
+                                text = chipText,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (searchQuery.equals(chipText, ignoreCase = true)) Color.Black else TextSecondary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (isSearching) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = CyanAccent,
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                } else if (searchResults.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(text = "No scrips found for \"$searchQuery\"", color = TextSecondary, fontSize = 12.sp)
+                            Text(text = "Try searching by official NSE ticker (e.g. RELIANCE, SBIN)", color = TextTertiary, fontSize = 10.sp)
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(searchResults, key = { "${it.token}_${it.symbol}" }) { scrip ->
+                            val cleanSym = scrip.symbol.removeSuffix("-EQ")
+                            val isAdded = watchlist.any { it.symbol == cleanSym || it.symbol == scrip.symbol }
+
+                            Card(
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(containerColor = BgDarkNavy),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = scrip.symbol,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimary
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(3.dp),
+                                                color = BgCardElevated
+                                            ) {
+                                                Text(
+                                                    text = "${scrip.exchange} • Token ${scrip.token}",
+                                                    fontSize = 8.sp,
+                                                    color = CyanAccent,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = scrip.name,
+                                            fontSize = 11.sp,
+                                            color = TextSecondary,
+                                            maxLines = 1
+                                        )
+                                    }
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            onClick = {
+                                                onAddToWatchlist(cleanSym, scrip.name, scrip.token)
+                                            },
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isAdded) BgCardElevated else CyanAccent.copy(alpha = 0.18f),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                1.dp,
+                                                if (isAdded) BgCardBorder else CyanAccent.copy(alpha = 0.4f)
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isAdded) Icons.Default.Check else Icons.Default.Star,
+                                                    contentDescription = null,
+                                                    tint = if (isAdded) BullishGreen else CyanAccent,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                                Text(
+                                                    text = if (isAdded) "Saved" else "Watchlist",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isAdded) BullishGreen else CyanAccent
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            onClick = {
+                                                onAnalyzeStock(cleanSym)
+                                            },
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = CyanAccent
+                                        ) {
+                                            Text(
+                                                text = "Analyze",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.Black,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {},
         containerColor = BgCardElevated
     )
 }

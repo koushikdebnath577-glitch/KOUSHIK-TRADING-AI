@@ -21,6 +21,7 @@ const cors = require('cors');
 const { WebSocketServer, WebSocket } = require('ws');
 const axios = require('axios');
 const { authenticator } = require('otplib');
+const { scripMasterManager, DEFAULT_FALLBACK_STOCKS } = require('./scripMaster');
 
 // ------------------------------------------------------------------------------
 // 1. CONFIGURATION & ENVIRONMENT
@@ -675,6 +676,7 @@ app.get('/health', (req, res) => {
       lastLoginTime: authManager.lastLoginTime,
       authError: authManager.lastError
     },
+    scripMaster: scripMasterManager.getStatus(),
     telemetry: {
       connectedClients: clientSockets.size,
       subscribedTokensCount: upstreamMarketFeed.subscribedTokens.size,
@@ -684,27 +686,44 @@ app.get('/health', (req, res) => {
 });
 
 /**
- * GET /api/search?q=stock_name
- * Fast stock search across Indian market scrips
+ * GET /api/search?q=SEARCH_QUERY
+ * Fast stock search across Angel One Scrip Master NSE Equity instruments
+ * Supports: Stock name, Trading symbol, Partial stock name, Partial trading symbol
+ * Example: HDFC, RELIANCE, TATA, INFY, SBIN
  */
 app.get('/api/search', (req, res) => {
-  const query = (req.query.q || '').toString().trim().toUpperCase();
-  if (!query) {
-    return res.json({ status: true, data: STOCK_DIRECTORY });
+  try {
+    const query = (req.query.q || req.query.query || '').toString().trim();
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+
+    const matchedScrips = scripMasterManager.search(query, limit);
+
+    // Format results to strictly match the requested Angel One Scrip Master JSON schema:
+    // { name, symbol, token, exchange, instrumentType }
+    const results = matchedScrips.map(item => ({
+      name: item.name,
+      symbol: item.symbol,
+      token: String(item.token),
+      exchange: item.exchange || 'NSE',
+      instrumentType: item.instrumentType || item.instrumenttype || 'EQ'
+    }));
+
+    res.json({
+      status: true,
+      query,
+      count: results.length,
+      results,
+      data: results
+    });
+  } catch (err) {
+    console.error(`[REST Search] Error executing scrip search: ${err.message}`);
+    res.status(500).json({
+      status: false,
+      error: 'Failed to search scrip master',
+      results: [],
+      data: []
+    });
   }
-
-  const results = STOCK_DIRECTORY.filter(item =>
-    item.symbol.toUpperCase().includes(query) ||
-    item.name.toUpperCase().includes(query) ||
-    item.token.includes(query)
-  );
-
-  res.json({
-    status: true,
-    query,
-    count: results.length,
-    data: results
-  });
 });
 
 /**
@@ -743,14 +762,22 @@ app.get('/api/quote', async (req, res) => {
   }
 
   // 2. Fallback to internal quote engine
-  const stock = tokenMap.get(symbolToken) || {
+  const scripFromMaster = scripMasterManager.getByToken(symbolToken) || scripMasterManager.getBySymbol(symbolToken);
+  const stock = tokenMap.get(symbolToken) || (scripFromMaster ? {
+    symbol: scripFromMaster.symbol,
+    name: scripFromMaster.name,
+    token: scripFromMaster.token,
+    exchange: scripFromMaster.exchange || exchange,
+    ltp: 1250.0,
+    prevClose: 1240.0
+  } : {
     symbol: `TOKEN_${symbolToken}`,
     name: 'Stock Instrument',
     token: symbolToken,
     exchange,
     ltp: 1000.0,
     prevClose: 990.0
-  };
+  });
 
   const ltp = stock.ltp;
   const change = Math.round((ltp - stock.prevClose) * 100) / 100;
@@ -970,6 +997,13 @@ server.listen(PORT, async () => {
   console.log(`📡 Health Check URL: http://localhost:${PORT}/health`);
   console.log(`⚡ WebSocket URL: ws://localhost:${PORT}/ws/market`);
   console.log('================================================================');
+
+  // Initialize Angel One Scrip Master Engine (Loads local cache / refreshes in background)
+  try {
+    await scripMasterManager.initialize();
+  } catch (smErr) {
+    console.error(`[Init] Scrip Master initialization error: ${smErr.message}`);
+  }
 
   // Attempt initial Angel One SmartAPI authentication
   if (isAngelConfigured()) {
