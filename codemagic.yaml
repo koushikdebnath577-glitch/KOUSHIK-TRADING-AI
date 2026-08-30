@@ -1,20 +1,19 @@
 workflows:
   android-workflow:
-    name: Koushik Trading AI Android Build
-
+    name: Android Build Workflow
+    max_build_duration: 30
+    instance_type: mac_mini_m1
     environment:
-      flutter: stable
-      groups:
-        - default
-
+      java: 17
     scripts:
-      - name: Get packages
+      - name: Set up Environment
         script: |
-          flutter pub get
-
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+          gradle wrapper --gradle-version 9.3.1
+          chmod +x gradlew
+          keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
       - name: Build Android APK
         script: |
-          flutter build apk --release
-
+          ./gradlew assembleDebug
     artifacts:
-      - build/app/outputs/flutter-apk/app-release.apk
+      - app/build/outputs/apk/debug/*.apk
