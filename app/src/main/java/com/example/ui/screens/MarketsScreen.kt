@@ -19,26 +19,32 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.WatchlistEntity
+import com.example.data.model.IndexItem
 import com.example.data.model.StockSearchResult
 import com.example.data.model.StockSymbol
+import com.example.data.repository.IndicesDataProvider
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 
 @Composable
 fun MarketsScreen(
     symbols: List<StockSymbol>,
+    indices: List<IndexItem> = emptyList(),
     watchlist: List<WatchlistEntity>,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     onStockSelected: (String) -> Unit,
+    onSelectIndex: (IndexItem) -> Unit = {},
     onToggleWatchlist: (String, String, String) -> Unit,
     onSearchScripMaster: (suspend (String) -> List<StockSearchResult>)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedFilter by remember { mutableStateOf("ALL") }
+    var selectedIndexSubCategory by remember { mutableStateOf("ALL") }
     var scripMasterResults by remember { mutableStateOf<List<StockSearchResult>>(emptyList()) }
     var isSearchingScripMaster by remember { mutableStateOf(false) }
 
+    val allIndices = if (indices.isNotEmpty()) indices else IndicesDataProvider.DEFAULT_INDICES
     val watchlistSymbols = remember(watchlist) { watchlist.map { it.symbol }.toSet() }
 
     LaunchedEffect(searchQuery) {
@@ -58,6 +64,22 @@ fun MarketsScreen(
         }
     }
 
+    val filteredIndices = remember(allIndices, searchQuery, selectedIndexSubCategory) {
+        val base = if (searchQuery.isBlank()) allIndices else {
+            allIndices.filter {
+                it.symbol.contains(searchQuery, ignoreCase = true) ||
+                it.name.contains(searchQuery, ignoreCase = true) ||
+                it.category.contains(searchQuery, ignoreCase = true)
+            }
+        }
+        when (selectedIndexSubCategory) {
+            "BROAD MARKET" -> base.filter { it.category.equals("Broad Market", ignoreCase = true) }
+            "SECTORAL" -> base.filter { it.category.equals("Sectoral", ignoreCase = true) }
+            "THEMATIC" -> base.filter { it.category.equals("Thematic", ignoreCase = true) }
+            else -> base
+        }
+    }
+
     val filteredSymbols = remember(symbols, searchQuery, selectedFilter) {
         val base = if (searchQuery.isBlank()) symbols else {
             symbols.filter {
@@ -67,7 +89,6 @@ fun MarketsScreen(
             }
         }
         when (selectedFilter) {
-            "INDICES" -> base.filter { it.symbol in listOf("NIFTY 50", "BANKNIFTY", "FINNIFTY", "INDIA VIX") }
             "GAINERS" -> base.filter { it.change > 0 }.sortedByDescending { it.changePercent }
             "LOSERS" -> base.filter { it.change < 0 }.sortedBy { it.changePercent }
             "HIGH VOL" -> base.sortedByDescending { it.volume }
@@ -159,14 +180,166 @@ fun MarketsScreen(
             }
         }
 
+        if (selectedFilter == "INDICES") {
+            Spacer(modifier = Modifier.height(8.dp))
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                val subCategories = listOf("ALL", "BROAD MARKET", "SECTORAL", "THEMATIC")
+                items(subCategories) { cat ->
+                    val isSubSelected = cat == selectedIndexSubCategory
+                    Surface(
+                        onClick = { selectedIndexSubCategory = cat },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSubSelected) CyanAccentBg else BgCardElevated,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSubSelected) CyanAccent else BgCardBorder),
+                        modifier = Modifier.height(22.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        ) {
+                            Text(
+                                text = cat,
+                                fontSize = 9.sp,
+                                fontWeight = if (isSubSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSubSelected) CyanAccent else TextTertiary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Stock List
+        // Stock or Index List
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(filteredSymbols, key = { it.symbol }) { stock ->
+            if (selectedFilter == "INDICES") {
+                items(filteredIndices, key = { it.symbol }) { idx ->
+                    val isPos = idx.change >= 0
+
+                    Card(
+                        onClick = { onSelectIndex(idx) },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = BgCard),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("market_index_row_${idx.symbol}")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Left: Index Info
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = idx.symbol,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Surface(shape = RoundedCornerShape(3.dp), color = CyanAccentBg) {
+                                        Text(
+                                            text = idx.category,
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = CyanAccent,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = idx.name,
+                                    fontSize = 11.sp,
+                                    color = TextTertiary,
+                                    maxLines = 1
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.List,
+                                        contentDescription = null,
+                                        tint = CyanAccent,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "${idx.constituentCount} Constituent Stocks • Tap to view",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = CyanAccent
+                                    )
+                                }
+                            }
+
+                            // Right: Price + Action Buttons
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = "₹${String.format(java.util.Locale.US, "%,.2f", idx.ltp)}",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", idx.changePercent)}%",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isPos) BullishGreen else BearishRed
+                                    )
+                                }
+
+                                Surface(
+                                    onClick = { onSelectIndex(idx) },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = CyanAccentBg,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
+                                    modifier = Modifier.testTag("view_constituents_btn_${idx.symbol}")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ViewList,
+                                            contentDescription = "Constituents",
+                                            tint = CyanAccent,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = "Stocks",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = CyanAccent
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                items(filteredSymbols, key = { it.symbol }) { stock ->
                 val isStarred = watchlistSymbols.contains(stock.symbol)
                 val isPos = stock.change >= 0
 

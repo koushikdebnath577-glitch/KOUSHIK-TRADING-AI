@@ -22,6 +22,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const axios = require('axios');
 const { authenticator } = require('otplib');
 const { scripMasterManager, DEFAULT_FALLBACK_STOCKS } = require('./scripMaster');
+const { indicesManager } = require('./indicesManager');
 
 // ------------------------------------------------------------------------------
 // 1. CONFIGURATION & ENVIRONMENT
@@ -677,12 +678,104 @@ app.get('/health', (req, res) => {
       authError: authManager.lastError
     },
     scripMaster: scripMasterManager.getStatus(),
+    indices: {
+      supportedCount: indicesManager.getAllIndices().length,
+      lastRefreshed: indicesManager.lastRefreshTime
+    },
     telemetry: {
       connectedClients: clientSockets.size,
       subscribedTokensCount: upstreamMarketFeed.subscribedTokens.size,
       uptimeSeconds: Math.floor(process.uptime())
     }
   });
+});
+
+/**
+ * GET /api/indices
+ * Return list of all 23 supported NSE indices with live market quotes
+ */
+app.get('/api/indices', (req, res) => {
+  try {
+    const list = indicesManager.getAllIndices();
+    res.json({
+      status: true,
+      count: list.length,
+      indices: list,
+      data: list
+    });
+  } catch (err) {
+    console.error(`[REST Indices] Error fetching all indices: ${err.message}`);
+    res.status(500).json({
+      status: false,
+      error: 'Failed to retrieve indices',
+      indices: [],
+      data: []
+    });
+  }
+});
+
+/**
+ * GET /api/indices/:indexName/constituents
+ * Return constituent stocks for the specified index with live price & stats
+ */
+app.get('/api/indices/:indexName/constituents', (req, res) => {
+  try {
+    const indexName = req.params.indexName;
+    const data = indicesManager.getConstituents(indexName, scripMasterManager);
+
+    if (!data) {
+      return res.status(404).json({
+        status: false,
+        error: `Index '${indexName}' not found among supported NSE indices.`,
+        constituents: []
+      });
+    }
+
+    res.json({
+      status: true,
+      index: data.index,
+      count: data.count,
+      constituents: data.constituents,
+      data: data.constituents
+    });
+  } catch (err) {
+    console.error(`[REST Constituents] Error fetching constituents for ${req.params.indexName}: ${err.message}`);
+    res.status(500).json({
+      status: false,
+      error: 'Failed to retrieve index constituents',
+      constituents: []
+    });
+  }
+});
+
+/**
+ * GET /api/indices/:indexName
+ * Return details for a single index
+ */
+app.get('/api/indices/:indexName', (req, res) => {
+  try {
+    const indexName = req.params.indexName;
+    const details = indicesManager.getIndexDetails(indexName);
+
+    if (!details) {
+      return res.status(404).json({
+        status: false,
+        error: `Index '${indexName}' not found.`
+      });
+    }
+
+    res.json({
+      status: true,
+      index: details,
+      data: details
+    });
+  } catch (err) {
+    console.error(`[REST Index Details] Error fetching details for ${req.params.indexName}: ${err.message}`);
+    res.status(500).json({
+      status: false,
+      error: 'Failed to retrieve index details'
+    });
+  }
 });
 
 /**
@@ -1001,8 +1094,10 @@ server.listen(PORT, async () => {
   // Initialize Angel One Scrip Master Engine (Loads local cache / refreshes in background)
   try {
     await scripMasterManager.initialize();
+    indicesManager.initialize(scripMasterManager);
   } catch (smErr) {
     console.error(`[Init] Scrip Master initialization error: ${smErr.message}`);
+    indicesManager.initialize(null);
   }
 
   // Attempt initial Angel One SmartAPI authentication

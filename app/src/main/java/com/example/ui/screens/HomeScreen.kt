@@ -20,24 +20,39 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.IndexItem
 import com.example.data.model.SetupGrade
 import com.example.data.model.StockSymbol
 import com.example.data.model.StrategyType
+import com.example.data.repository.IndicesDataProvider
 import com.example.ui.components.DisclaimerBanner
 import com.example.ui.theme.*
 
 @Composable
 fun HomeScreen(
     symbols: List<StockSymbol>,
+    indices: List<IndexItem> = emptyList(),
     defaultRiskAmount: Double = 2500.0,
     onEditRisk: () -> Unit = {},
+    onSelectIndex: (IndexItem) -> Unit = {},
     onSelectStockAndAnalyze: (String, StrategyType) -> Unit,
     onNavigateToMarkets: () -> Unit,
     onNavigateToWatchlist: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val indexSymbols = symbols.filter { it.symbol in listOf("NIFTY 50", "BANKNIFTY", "FINNIFTY", "INDIA VIX") }
-    val stockSymbols = symbols.filter { it.symbol !in listOf("NIFTY 50", "BANKNIFTY", "FINNIFTY", "INDIA VIX") }
+    val displayIndices = if (indices.isNotEmpty()) indices else IndicesDataProvider.DEFAULT_INDICES
+    val stockSymbols = symbols.filter { sym -> displayIndices.none { it.symbol == sym.symbol || it.alias == sym.symbol } }
+
+    var selectedIndexCategory by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("ALL") }
+
+    val filteredIndices = androidx.compose.runtime.remember(displayIndices, selectedIndexCategory) {
+        when (selectedIndexCategory) {
+            "BROAD MARKET" -> displayIndices.filter { it.category.equals("Broad Market", ignoreCase = true) }
+            "SECTORAL" -> displayIndices.filter { it.category.equals("Sectoral", ignoreCase = true) }
+            "THEMATIC" -> displayIndices.filter { it.category.equals("Thematic", ignoreCase = true) }
+            else -> displayIndices
+        }
+    }
 
     LazyColumn(
         modifier = modifier
@@ -171,23 +186,88 @@ fun HomeScreen(
             }
         }
 
-        // Market Indices Carousel
+        // Market Indices Section (All 23 Supported Indices)
         item {
             Column {
-                Text(
-                    text = "MAJOR INDICES",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextTertiary,
-                    letterSpacing = 0.5.sp
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "NSE INDICES (${displayIndices.size})",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextTertiary,
+                                letterSpacing = 0.5.sp
+                            )
+                            Surface(shape = RoundedCornerShape(4.dp), color = CyanAccentBg) {
+                                Text(
+                                    text = "TAP FOR CONSTITUENTS",
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyanAccent,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        text = "View Markets",
+                        fontSize = 11.sp,
+                        color = CyanAccent,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable { onNavigateToMarkets() }
+                            .padding(4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Category Chips for Indices
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val categories = listOf("ALL", "BROAD MARKET", "SECTORAL", "THEMATIC")
+                    items(categories) { cat ->
+                        val isSelected = cat == selectedIndexCategory
+                        Surface(
+                            onClick = { selectedIndexCategory = cat },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) CyanAccent else BgPillInactive,
+                            border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
+                            modifier = Modifier.height(24.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            ) {
+                                Text(
+                                    text = cat,
+                                    fontSize = 9.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color.White else TextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
+
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(indexSymbols) { sym ->
-                        IndexCard(sym = sym, onClick = { onSelectStockAndAnalyze(sym.symbol, StrategyType.RESISTANCE_REJECTION) })
+                    items(filteredIndices, key = { it.symbol }) { idx ->
+                        IndexCard(
+                            index = idx,
+                            onClick = { onSelectIndex(idx) }
+                        )
                     }
                 }
             }
@@ -270,36 +350,72 @@ fun HomeScreen(
 
 @Composable
 private fun IndexCard(
-    sym: StockSymbol,
+    index: IndexItem,
     onClick: () -> Unit
 ) {
-    val isPos = sym.change >= 0
+    val isPos = index.change >= 0
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = BgCard),
         border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
         modifier = Modifier
-            .width(135.dp)
-            .testTag("index_card_${sym.symbol}")
+            .width(160.dp)
+            .testTag("index_card_${index.symbol}")
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(text = sym.symbol, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, maxLines = 1)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = index.symbol,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                Surface(
+                    shape = RoundedCornerShape(3.dp),
+                    color = BgCardElevated
+                ) {
+                    Text(
+                        text = "${index.constituentCount}",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CyanAccent,
+                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "₹${String.format(java.util.Locale.US, "%.2f", sym.ltp)}",
+                text = "₹${String.format(java.util.Locale.US, "%,.2f", index.ltp)}",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                 color = TextPrimary
             )
             Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", sym.changePercent)}%",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (isPos) BullishGreen else BearishRed
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.changePercent)}%",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isPos) BullishGreen else BearishRed
+                )
+                Text(
+                    text = index.category,
+                    fontSize = 8.sp,
+                    color = TextTertiary
+                )
+            }
         }
     }
 }

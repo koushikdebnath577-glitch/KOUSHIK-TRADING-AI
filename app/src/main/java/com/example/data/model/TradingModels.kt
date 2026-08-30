@@ -193,3 +193,30 @@ data class TradeAlert(
     val isRead: Boolean = false,
     val isEnabled: Boolean = true
 )
+
+data class IndexItem(
+    val id: String,
+    val symbol: String,
+    val alias: String? = null,
+    val name: String,
+    val token: String,
+    val exchange: String = "NSE",
+    val category: String = "Broad Market",
+    val ltp: Double,
+    val change: Double,
+    val changePercent: Double,
+    val high: Double = ltp,
+    val low: Double = ltp,
+    val prevClose: Double = ltp,
+    val constituentCount: Int = 0,
+    val description: String = ""
+) {
+    val displayName: String get() = symbol
+}
+
+sealed interface LoadingState {
+    object Idle : LoadingState
+    object Loading : LoadingState
+    object Success : LoadingState
+    data class Error(val message: String) : LoadingState
+}

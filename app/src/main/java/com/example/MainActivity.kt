@@ -144,94 +144,121 @@ fun TradingAppRoot(
                 .padding(innerPadding)
                 .background(BgDarkNavy)
         ) {
-            when (uiState.activeTab) {
-                0 -> HomeScreen(
-                    symbols = marketSymbols,
-                    defaultRiskAmount = uiState.defaultRiskAmount,
-                    onEditRisk = { showEditRiskDialog = true },
+            if (uiState.isIndexDetailVisible && uiState.selectedIndex != null) {
+                androidx.activity.compose.BackHandler {
+                    viewModel.closeIndexDetail()
+                }
+                IndexDetailScreen(
+                    index = uiState.selectedIndex!!,
+                    constituents = uiState.indexConstituents,
+                    loadingState = uiState.constituentsLoadingState,
+                    watchlist = watchlist,
+                    onBack = { viewModel.closeIndexDetail() },
+                    onRefresh = { viewModel.loadConstituentsForIndex(uiState.selectedIndex!!) },
                     onSelectStockAndAnalyze = { symbol, strategy ->
+                        viewModel.closeIndexDetail()
                         viewModel.selectStock(symbol)
                         viewModel.selectStrategy(strategy)
                         viewModel.selectTab(2)
                     },
-                    onNavigateToMarkets = { viewModel.selectTab(1) },
-                    onNavigateToWatchlist = { viewModel.selectTab(3) }
-                )
-                1 -> MarketsScreen(
-                    symbols = marketSymbols,
-                    watchlist = watchlist,
-                    searchQuery = uiState.searchQuery,
-                    onSearchQueryChange = { viewModel.updateSearchQuery(it) },
-                    onStockSelected = { symbol ->
-                        viewModel.selectStock(symbol)
-                        viewModel.selectTab(2)
-                    },
                     onToggleWatchlist = { symbol, name, token ->
                         viewModel.toggleWatchlist(symbol, name, token)
-                    },
-                    onSearchScripMaster = { query ->
-                        viewModel.searchStocks(query)
                     }
                 )
-                2 -> AnalyzeScreen(
-                    selectedSymbol = uiState.selectedSymbol,
-                    stock = uiState.selectedStock,
-                    connectionStatus = uiState.connectionStatus,
-                    candles = uiState.candles,
-                    keyLevels = uiState.keyLevels,
-                    analysisResult = uiState.analysisResult,
-                    ema20 = uiState.ema20,
-                    ema50 = uiState.ema50,
-                    vwap = uiState.vwap,
-                    rsi = uiState.rsi,
-                    indicatorSettings = uiState.indicatorSettings,
-                    selectedTimeframe = uiState.selectedTimeframe,
-                    selectedStrategy = uiState.selectedStrategy,
-                    defaultRiskAmount = uiState.defaultRiskAmount,
-                    onTimeframeSelected = { viewModel.selectTimeframe(it) },
-                    onStrategySelected = { viewModel.selectStrategy(it) },
-                    onToggleIndicator = { viewModel.toggleIndicator(it) },
-                    onEditRisk = { showEditRiskDialog = true },
-                    onSavePlan = { viewModel.saveCurrentPlan() },
-                    onReconnect = { viewModel.reconnect() }
-                )
-                3 -> WatchlistScreen(
-                    watchlist = watchlist,
-                    marketSymbols = marketSymbols,
-                    savedPlans = savedPlans,
-                    alerts = alerts,
-                    onSelectStock = { symbol ->
-                        viewModel.selectStock(symbol)
-                        viewModel.selectTab(2)
-                    },
-                    onRemoveFromWatchlist = { symbol ->
-                        viewModel.toggleWatchlist(symbol, "", "")
-                    },
-                    onAddToWatchlist = { symbol, name, token ->
-                        viewModel.toggleWatchlist(symbol, name, token)
-                    },
-                    onSearchScripMaster = { query ->
-                        viewModel.searchStocks(query)
-                    },
-                    onDeleteSavedPlan = { planId ->
-                        viewModel.deleteSavedPlan(planId)
-                    },
-                    onToggleAlert = { id, enabled ->
-                        viewModel.toggleAlert(id, enabled)
-                    },
-                    onDeleteAlert = { id ->
-                        viewModel.deleteAlert(id)
-                    },
-                    onCreateAlert = { symbol, title, msg, price ->
-                        viewModel.createAlert(symbol, title, msg, price)
-                    }
-                )
-                4 -> SettingsScreen(
-                    defaultRisk = uiState.defaultRiskAmount,
-                    defaultTargetRR = uiState.defaultTargetRR,
-                    onUpdateRisk = { risk, rr -> viewModel.updateRiskSettings(risk, rr) },
-                    onUpdateBackendConfig = { config -> viewModel.updateBackendConfig(config) }
-                )
+            } else {
+                when (uiState.activeTab) {
+                    0 -> HomeScreen(
+                        symbols = marketSymbols,
+                        indices = uiState.indices,
+                        defaultRiskAmount = uiState.defaultRiskAmount,
+                        onEditRisk = { showEditRiskDialog = true },
+                        onSelectIndex = { viewModel.openIndexDetail(it) },
+                        onSelectStockAndAnalyze = { symbol, strategy ->
+                            viewModel.selectStock(symbol)
+                            viewModel.selectStrategy(strategy)
+                            viewModel.selectTab(2)
+                        },
+                        onNavigateToMarkets = { viewModel.selectTab(1) },
+                        onNavigateToWatchlist = { viewModel.selectTab(3) }
+                    )
+                    1 -> MarketsScreen(
+                        symbols = marketSymbols,
+                        indices = uiState.indices,
+                        watchlist = watchlist,
+                        searchQuery = uiState.searchQuery,
+                        onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+                        onStockSelected = { symbol ->
+                            viewModel.selectStock(symbol)
+                            viewModel.selectTab(2)
+                        },
+                        onSelectIndex = { viewModel.openIndexDetail(it) },
+                        onToggleWatchlist = { symbol, name, token ->
+                            viewModel.toggleWatchlist(symbol, name, token)
+                        },
+                        onSearchScripMaster = { query ->
+                            viewModel.searchStocks(query)
+                        }
+                    )
+                    2 -> AnalyzeScreen(
+                        selectedSymbol = uiState.selectedSymbol,
+                        stock = uiState.selectedStock,
+                        connectionStatus = uiState.connectionStatus,
+                        candles = uiState.candles,
+                        keyLevels = uiState.keyLevels,
+                        analysisResult = uiState.analysisResult,
+                        ema20 = uiState.ema20,
+                        ema50 = uiState.ema50,
+                        vwap = uiState.vwap,
+                        rsi = uiState.rsi,
+                        indicatorSettings = uiState.indicatorSettings,
+                        selectedTimeframe = uiState.selectedTimeframe,
+                        selectedStrategy = uiState.selectedStrategy,
+                        defaultRiskAmount = uiState.defaultRiskAmount,
+                        onTimeframeSelected = { viewModel.selectTimeframe(it) },
+                        onStrategySelected = { viewModel.selectStrategy(it) },
+                        onToggleIndicator = { viewModel.toggleIndicator(it) },
+                        onEditRisk = { showEditRiskDialog = true },
+                        onSavePlan = { viewModel.saveCurrentPlan() },
+                        onReconnect = { viewModel.reconnect() }
+                    )
+                    3 -> WatchlistScreen(
+                        watchlist = watchlist,
+                        marketSymbols = marketSymbols,
+                        savedPlans = savedPlans,
+                        alerts = alerts,
+                        onSelectStock = { symbol ->
+                            viewModel.selectStock(symbol)
+                            viewModel.selectTab(2)
+                        },
+                        onRemoveFromWatchlist = { symbol ->
+                            viewModel.toggleWatchlist(symbol, "", "")
+                        },
+                        onAddToWatchlist = { symbol, name, token ->
+                            viewModel.toggleWatchlist(symbol, name, token)
+                        },
+                        onSearchScripMaster = { query ->
+                            viewModel.searchStocks(query)
+                        },
+                        onDeleteSavedPlan = { planId ->
+                            viewModel.deleteSavedPlan(planId)
+                        },
+                        onToggleAlert = { id, enabled ->
+                            viewModel.toggleAlert(id, enabled)
+                        },
+                        onDeleteAlert = { id ->
+                            viewModel.deleteAlert(id)
+                        },
+                        onCreateAlert = { symbol, title, msg, price ->
+                            viewModel.createAlert(symbol, title, msg, price)
+                        }
+                    )
+                    4 -> SettingsScreen(
+                        defaultRisk = uiState.defaultRiskAmount,
+                        defaultTargetRR = uiState.defaultTargetRR,
+                        onUpdateRisk = { risk, rr -> viewModel.updateRiskSettings(risk, rr) },
+                        onUpdateBackendConfig = { config -> viewModel.updateBackendConfig(config) }
+                    )
+                }
             }
         }
     }

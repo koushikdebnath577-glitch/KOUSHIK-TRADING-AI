@@ -35,7 +35,14 @@ data class TradingUiState(
     val defaultTargetRR: Double = UserPreferences.DEFAULT_TARGET_RR,
     val userSavedNotes: String = "",
     val isPlanSavedSnackbarShown: Boolean = false,
-    val activeBannerDismissed: Boolean = false
+    val activeBannerDismissed: Boolean = false,
+    val indices: List<IndexItem> = emptyList(),
+    val selectedIndex: IndexItem? = null,
+    val indexConstituents: List<StockSymbol> = emptyList(),
+    val indicesLoadingState: LoadingState = LoadingState.Idle,
+    val constituentsLoadingState: LoadingState = LoadingState.Idle,
+    val selectedIndexCategory: String = "All",
+    val isIndexDetailVisible: Boolean = false
 )
 
 class TradingViewModel(application: Application) : AndroidViewModel(application) {
@@ -121,10 +128,93 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
                 }
             }.collect()
         }
+        viewModelScope.launch {
+            repository.indices.collect { indicesList ->
+                _uiState.update { current ->
+                    current.copy(
+                        indices = indicesList,
+                        selectedIndex = if (current.selectedIndex == null && indicesList.isNotEmpty()) {
+                            indicesList.first()
+                        } else {
+                            indicesList.find { it.id == current.selectedIndex?.id || it.symbol == current.selectedIndex?.symbol } ?: current.selectedIndex
+                        }
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            refreshIndices()
+        }
     }
 
     fun selectTab(tabIndex: Int) {
         _uiState.update { it.copy(activeTab = tabIndex) }
+    }
+
+    fun selectIndexCategory(category: String) {
+        _uiState.update { it.copy(selectedIndexCategory = category) }
+    }
+
+    fun openIndexDetail(index: IndexItem) {
+        _uiState.update { 
+            it.copy(
+                selectedIndex = index,
+                isIndexDetailVisible = true,
+                constituentsLoadingState = LoadingState.Loading
+            ) 
+        }
+        loadConstituentsForIndex(index)
+    }
+
+    fun closeIndexDetail() {
+        _uiState.update { it.copy(isIndexDetailVisible = false) }
+    }
+
+    fun selectIndex(index: IndexItem) {
+        _uiState.update { it.copy(selectedIndex = index) }
+        loadConstituentsForIndex(index)
+    }
+
+    fun refreshIndices() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(indicesLoadingState = LoadingState.Loading) }
+            try {
+                val list = repository.refreshIndices()
+                _uiState.update { 
+                    it.copy(
+                        indices = list,
+                        indicesLoadingState = LoadingState.Success
+                    ) 
+                }
+            } catch (e: Exception) {
+                _uiState.update { 
+                    it.copy(
+                        indicesLoadingState = LoadingState.Error(e.message ?: "Failed to load indices")
+                    ) 
+                }
+            }
+        }
+    }
+
+    fun loadConstituentsForIndex(index: IndexItem) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(constituentsLoadingState = LoadingState.Loading) }
+            try {
+                val constituents = repository.fetchIndexConstituents(index.id.ifEmpty { index.symbol })
+                _uiState.update { 
+                    it.copy(
+                        indexConstituents = constituents,
+                        constituentsLoadingState = LoadingState.Success
+                    ) 
+                }
+            } catch (e: Exception) {
+                _uiState.update { 
+                    it.copy(
+                        constituentsLoadingState = LoadingState.Error(e.message ?: "Failed to load constituents")
+                    ) 
+                }
+            }
+        }
     }
 
     fun selectStock(symbol: String) {

@@ -24,6 +24,9 @@ class TradingRepository(
     val alerts: Flow<List<AlertEntity>> = appDao.getAllAlerts()
     val savedPlans: Flow<List<SavedPlanEntity>> = appDao.getAllSavedPlans()
 
+    private val _indices = MutableStateFlow<List<IndexItem>>(IndicesDataProvider.DEFAULT_INDICES)
+    val indices: StateFlow<List<IndexItem>> = _indices.asStateFlow()
+
     private val _selectedSymbol = MutableStateFlow("NIFTY 50")
     val selectedSymbol: StateFlow<String> = _selectedSymbol.asStateFlow()
 
@@ -221,5 +224,15 @@ class TradingRepository(
 
     suspend fun searchStocks(query: String): List<com.example.data.model.StockSearchResult> {
         return smartApiClient.searchStocks(query)
+    }
+
+    suspend fun refreshIndices(): List<IndexItem> {
+        val fetched = smartApiClient.fetchIndices()
+        _indices.value = fetched
+        return fetched
+    }
+
+    suspend fun fetchIndexConstituents(indexIdOrSymbol: String): List<StockSymbol> {
+        return smartApiClient.fetchIndexConstituents(indexIdOrSymbol)
     }
 }

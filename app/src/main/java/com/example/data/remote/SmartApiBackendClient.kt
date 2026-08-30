@@ -3,9 +3,11 @@ package com.example.data.remote
 import android.util.Log
 import com.example.data.model.Candle
 import com.example.data.model.ConnectionStatus
+import com.example.data.model.IndexItem
 import com.example.data.model.StockSymbol
 import com.example.data.model.StockSearchResult
 import com.example.data.model.Timeframe
+import com.example.data.repository.IndicesDataProvider
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -595,5 +597,128 @@ class SmartApiBackendClient {
                     instrumentType = "EQ"
                 )
             }
+    }
+
+    /**
+     * Fetches all 23 supported NSE indices from backend GET /api/indices
+     * with graceful fallback to built-in IndicesDataProvider.
+     */
+    suspend fun fetchIndices(): List<IndexItem> = withContext(Dispatchers.IO) {
+        try {
+            val base = if (backendConfig.serverUrl.endsWith("/api")) {
+                backendConfig.serverUrl
+            } else {
+                "${backendConfig.serverUrl}/api"
+            }
+            val url = "$base/indices"
+
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bodyStr = response.body?.string()
+                if (!bodyStr.isNullOrBlank()) {
+                    val json = JSONObject(bodyStr)
+                    val array = json.optJSONArray("indices") ?: json.optJSONArray("data") ?: JSONArray()
+                    val list = mutableListOf<IndexItem>()
+
+                    for (i in 0 until array.length()) {
+                        val item = array.optJSONObject(i) ?: continue
+                        list.add(
+                            IndexItem(
+                                id = item.optString("id", item.optString("symbol", "").lowercase().replace(" ", "-")),
+                                symbol = item.optString("symbol", ""),
+                                alias = if (item.has("alias") && !item.isNull("alias")) item.optString("alias") else null,
+                                name = item.optString("name", item.optString("symbol", "")),
+                                token = item.optString("token", ""),
+                                exchange = item.optString("exchange", "NSE"),
+                                category = item.optString("category", "Broad Market"),
+                                ltp = item.optDouble("ltp", 0.0),
+                                change = item.optDouble("change", 0.0),
+                                changePercent = item.optDouble("changePercent", 0.0),
+                                high = item.optDouble("high", item.optDouble("ltp", 0.0)),
+                                low = item.optDouble("low", item.optDouble("ltp", 0.0)),
+                                prevClose = item.optDouble("prevClose", item.optDouble("ltp", 0.0)),
+                                constituentCount = item.optInt("constituentCount", 0),
+                                description = item.optString("description", "")
+                            )
+                        )
+                    }
+
+                    if (list.isNotEmpty()) {
+                        return@withContext list
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to fetch indices from backend (${e.message}), using default indices dataset")
+        }
+
+        return@withContext IndicesDataProvider.DEFAULT_INDICES
+    }
+
+    /**
+     * Fetches constituent stocks for an index from GET /api/indices/:name/constituents
+     */
+    suspend fun fetchIndexConstituents(indexIdOrSymbol: String): List<StockSymbol> = withContext(Dispatchers.IO) {
+        val sanitized = indexIdOrSymbol.trim()
+        if (sanitized.isEmpty()) return@withContext emptyList()
+
+        try {
+            val base = if (backendConfig.serverUrl.endsWith("/api")) {
+                backendConfig.serverUrl
+            } else {
+                "${backendConfig.serverUrl}/api"
+            }
+            val encodedName = java.net.URLEncoder.encode(sanitized, "UTF-8")
+            val url = "$base/indices/$encodedName/constituents"
+
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bodyStr = response.body?.string()
+                if (!bodyStr.isNullOrBlank()) {
+                    val json = JSONObject(bodyStr)
+                    val array = json.optJSONArray("constituents") ?: json.optJSONArray("data") ?: JSONArray()
+                    val list = mutableListOf<StockSymbol>()
+
+                    for (i in 0 until array.length()) {
+                        val item = array.optJSONObject(i) ?: continue
+                        list.add(
+                            StockSymbol(
+                                symbol = item.optString("symbol", ""),
+                                name = item.optString("name", item.optString("symbol", "")),
+                                token = item.optString("token", ""),
+                                exchange = item.optString("exchange", "NSE"),
+                                ltp = item.optDouble("ltp", 0.0),
+                                change = item.optDouble("change", 0.0),
+                                changePercent = item.optDouble("changePercent", 0.0),
+                                open = item.optDouble("open", item.optDouble("ltp", 0.0)),
+                                high = item.optDouble("high", item.optDouble("ltp", 0.0)),
+                                low = item.optDouble("low", item.optDouble("ltp", 0.0)),
+                                close = item.optDouble("ltp", 0.0),
+                                volume = item.optLong("volume", 1000000L),
+                                previousClose = item.optDouble("previousClose", item.optDouble("ltp", 0.0))
+                            )
+                        )
+                    }
+
+                    if (list.isNotEmpty()) {
+                        return@withContext list
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to fetch constituents for $indexIdOrSymbol (${e.message}), using fallback dataset")
+        }
+
+        return@withContext IndicesDataProvider.getConstituentsForIndex(sanitized)
     }
 }
