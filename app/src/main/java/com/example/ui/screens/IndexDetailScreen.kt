@@ -375,7 +375,7 @@ fun IndexDetailScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
-                            horizontalAlignment = Alignment.CenterVertically,
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             CircularProgressIndicator(
@@ -404,7 +404,7 @@ fun IndexDetailScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterVertically,
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(

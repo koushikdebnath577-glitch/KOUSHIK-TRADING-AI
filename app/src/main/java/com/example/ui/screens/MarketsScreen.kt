@@ -453,6 +453,7 @@ fun MarketsScreen(
                     }
                 }
             }
+        }
 
             // Scrip Master Live Search Results
             if (searchQuery.isNotBlank()) {

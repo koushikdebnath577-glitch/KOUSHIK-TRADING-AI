@@ -56,26 +56,26 @@ function isAngelConfigured() {
 // 2. SCRIP MASTER & POPULAR STOCKS DIRECTORY
 // ------------------------------------------------------------------------------
 const STOCK_DIRECTORY = [
-  { symbol: 'NIFTY 50', name: 'NIFTY 50 INDEX', token: '99926000', exchange: 'NSE', ltp: 24320.50, prevClose: 24177.70 },
-  { symbol: 'BANKNIFTY', name: 'NIFTY BANK INDEX', token: '99926009', exchange: 'NSE', ltp: 51680.75, prevClose: 51801.05 },
-  { symbol: 'FINNIFTY', name: 'NIFTY FINANCIAL SERVICES', token: '99926037', exchange: 'NSE', ltp: 23140.20, prevClose: 23090.50 },
-  { symbol: 'RELIANCE', name: 'Reliance Industries Ltd', token: '2885', exchange: 'NSE', ltp: 2980.40, prevClose: 2947.80 },
-  { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', token: '1333', exchange: 'NSE', ltp: 1642.15, prevClose: 1650.60 },
-  { symbol: 'TCS', name: 'Tata Consultancy Services', token: '11536', exchange: 'NSE', ltp: 4185.00, prevClose: 4139.80 },
-  { symbol: 'INFY', name: 'Infosys Ltd', token: '1594', exchange: 'NSE', ltp: 1795.50, prevClose: 1774.20 },
-  { symbol: 'ICICIBANK', name: 'ICICI Bank Ltd', token: '4963', exchange: 'NSE', ltp: 1198.80, prevClose: 1184.60 },
-  { symbol: 'TATAMOTORS', name: 'Tata Motors Ltd', token: '3456', exchange: 'NSE', ltp: 984.60, prevClose: 997.00 },
-  { symbol: 'SBIN', name: 'State Bank of India', token: '3045', exchange: 'NSE', ltp: 812.30, prevClose: 808.50 },
-  { symbol: 'ITC', name: 'ITC Ltd', token: '1660', exchange: 'NSE', ltp: 468.90, prevClose: 470.10 },
-  { symbol: 'BHARTIARTL', name: 'Bharti Airtel Ltd', token: '10604', exchange: 'NSE', ltp: 1485.00, prevClose: 1466.50 },
-  { symbol: 'LT', name: 'Larsen & Toubro Ltd', token: '11483', exchange: 'NSE', ltp: 3620.00, prevClose: 3645.00 },
-  { symbol: 'KOTAKBANK', name: 'Kotak Mahindra Bank Ltd', token: '1922', exchange: 'NSE', ltp: 1785.40, prevClose: 1772.10 },
-  { symbol: 'AXISBANK', name: 'Axis Bank Ltd', token: '5900', exchange: 'NSE', ltp: 1175.20, prevClose: 1168.90 },
-  { symbol: 'BAJFINANCE', name: 'Bajaj Finance Ltd', token: '317', exchange: 'NSE', ltp: 6920.00, prevClose: 6880.00 },
-  { symbol: 'MARUTI', name: 'Maruti Suzuki India Ltd', token: '10999', exchange: 'NSE', ltp: 12450.00, prevClose: 12380.00 },
-  { symbol: 'SUNPHARMA', name: 'Sun Pharmaceutical Ltd', token: '3351', exchange: 'NSE', ltp: 1680.00, prevClose: 1672.00 },
-  { symbol: 'TITAN', name: 'Titan Company Ltd', token: '3506', exchange: 'NSE', ltp: 3580.00, prevClose: 3560.00 },
-  { symbol: 'TATASTEEL', name: 'Tata Steel Ltd', token: '3499', exchange: 'NSE', ltp: 154.20, prevClose: 153.10 }
+  { symbol: 'NIFTY 50', name: 'NIFTY 50 INDEX', token: '99926000', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'BANKNIFTY', name: 'NIFTY BANK INDEX', token: '99926009', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'FINNIFTY', name: 'NIFTY FINANCIAL SERVICES', token: '99926037', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'RELIANCE', name: 'Reliance Industries Ltd', token: '2885', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', token: '1333', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'TCS', name: 'Tata Consultancy Services', token: '11536', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'INFY', name: 'Infosys Ltd', token: '1594', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'ICICIBANK', name: 'ICICI Bank Ltd', token: '4963', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'TATAMOTORS', name: 'Tata Motors Ltd', token: '3456', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'SBIN', name: 'State Bank of India', token: '3045', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'ITC', name: 'ITC Ltd', token: '1660', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'BHARTIARTL', name: 'Bharti Airtel Ltd', token: '10604', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'LT', name: 'Larsen & Toubro Ltd', token: '11483', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'KOTAKBANK', name: 'Kotak Mahindra Bank Ltd', token: '1922', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'AXISBANK', name: 'Axis Bank Ltd', token: '5900', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'BAJFINANCE', name: 'Bajaj Finance Ltd', token: '317', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'MARUTI', name: 'Maruti Suzuki India Ltd', token: '10999', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'SUNPHARMA', name: 'Sun Pharmaceutical Ltd', token: '3351', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'TITAN', name: 'Titan Company Ltd', token: '3506', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'TATASTEEL', name: 'Tata Steel Ltd', token: '3499', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 }
 ];
 
 // Map token to stock item for O(1) lookups
@@ -456,36 +456,75 @@ class UpstreamMarketFeed {
       let parsedTick = null;
 
       if (typeof data === 'string') {
-        parsedTick = JSON.parse(data);
+        const json = JSON.parse(data);
+        const token = String(json.token || json.token_id || json.symboltoken || '');
+        const ltpRaw = json.ltp || json.last_traded_price || json.close || 0;
+        const ltp = (typeof ltpRaw === 'number' && ltpRaw > 100000 && !String(ltpRaw).includes('.')) ? (ltpRaw / 100.0) : Number(ltpRaw);
+        parsedTick = {
+          token,
+          ltp,
+          angelOneLtp: ltp,
+          backendForwardedLtp: ltp,
+          volume: json.volume || json.vol || 0,
+          timestamp: json.timestamp || Date.now()
+        };
       } else if (Buffer.isBuffer(data) && data.length >= 10) {
-        // Binary packet parsing for SmartStream LTP mode
-        const token = data.readUInt32LE(0).toString();
-        const ltp = data.readInt32LE(4) / 100.0;
-        parsedTick = { token, ltp, timestamp: Date.now() };
+        // SmartStream V2 Binary Protocol Parser
+        // Byte 0: Subscription mode, Byte 1: Exchange Type (1=NSE_CM), Byte 2..26: Token string (25 bytes null-terminated)
+        let token = '';
+        if (data.length >= 27) {
+          token = data.toString('utf8', 2, 27).replace(/\0/g, '').trim();
+        }
+        if (!token && data.length >= 4) {
+          token = data.readUInt32LE(0).toString();
+        }
+
+        let ltp = 0;
+        if (data.length >= 51) {
+          // LTP mode: offset 43 is int64 last traded price in paise
+          const ltpPaise = Number(data.readBigInt64LE ? data.readBigInt64LE(43) : data.readInt32LE(43));
+          ltp = ltpPaise / 100.0;
+        } else if (data.length >= 8) {
+          ltp = data.readInt32LE(4) / 100.0;
+        }
+
+        parsedTick = {
+          token,
+          ltp,
+          angelOneLtp: ltp,
+          backendForwardedLtp: ltp,
+          volume: 0,
+          timestamp: Date.now()
+        };
       }
 
-      if (parsedTick && parsedTick.token && parsedTick.ltp) {
-        this.broadcastTick(parsedTick.token, parsedTick.ltp, parsedTick.volume || 100);
+      if (parsedTick && parsedTick.token && parsedTick.ltp > 0) {
+        const stockInfo = tokenMap.get(parsedTick.token) || { symbol: `TOKEN_${parsedTick.token}`, exchange: 'NSE' };
+        console.log(`[SmartStream Tick Audit] Symbol: ${stockInfo.symbol} | Exchange: ${stockInfo.exchange || 'NSE'} | Token: ${parsedTick.token} | Timestamp: ${parsedTick.timestamp} | Angel One LTP: ${parsedTick.angelOneLtp} | Backend Forwarded LTP: ${parsedTick.backendForwardedLtp}`);
+        this.broadcastTick(parsedTick.token, parsedTick.ltp, parsedTick.volume || 0, parsedTick.angelOneLtp, parsedTick.backendForwardedLtp);
       }
     } catch (err) {
-      // Ignore unparseable frames
+      console.warn(`[SmartStream] Frame parse exception: ${err.message}`);
     }
   }
 
-  broadcastTick(token, ltp, volume) {
-    const stockInfo = tokenMap.get(token) || { symbol: `TOKEN_${token}`, prevClose: ltp };
+  broadcastTick(token, ltp, volume, angelOneLtp = ltp, backendForwardedLtp = ltp) {
+    const stockInfo = tokenMap.get(token) || { symbol: `TOKEN_${token}`, exchange: 'NSE', prevClose: ltp };
     stockInfo.ltp = ltp;
-    const change = Math.round((ltp - stockInfo.prevClose) * 100) / 100;
-    const changePercent = Math.round((change / stockInfo.prevClose) * 10000) / 100;
+    const change = stockInfo.prevClose > 0 ? Math.round((ltp - stockInfo.prevClose) * 100) / 100 : 0.0;
+    const changePercent = stockInfo.prevClose > 0 ? Math.round((change / stockInfo.prevClose) * 10000) / 100 : 0.0;
 
     const tickPayload = {
       type: 'tick',
       token,
       symbol: stockInfo.symbol,
+      exchange: stockInfo.exchange || 'NSE',
       ltp,
+      angelOneLtp,
+      backendForwardedLtp,
       change,
       changePercent,
-      volume: volume || 100,
+      volume: volume || 0,
       timestamp: Date.now()
     };
 
