@@ -248,14 +248,34 @@ class SmartApiBackendClient {
                 "tick" -> {
                     val token = json.optString("token", "")
                     val symbol = json.optString("symbol", "")
+                    val exchange = json.optString("exchange", "NSE")
                     val ltp = json.optDouble("ltp", 0.0)
+                    val angelOneLtp = json.optDouble("angelOneLtp", ltp)
+                    val backendForwardedLtp = json.optDouble("backendForwardedLtp", ltp)
                     val change = json.optDouble("change", 0.0)
                     val changePercent = json.optDouble("changePercent", 0.0)
                     val volume = json.optLong("volume", 0L)
                     val timestamp = json.optLong("timestamp", System.currentTimeMillis())
 
                     if (token.isNotEmpty() && ltp > 0) {
+                        Log.i(
+                            "DATA_AUDIT",
+                            "[DATA AUDIT: ANDROID RECEIVED] Symbol: $symbol | Exchange: $exchange | Token: $token | Timestamp: $timestamp | Angel One LTP: $angelOneLtp | Backend Forwarded LTP: $backendForwardedLtp | App Received LTP: $ltp"
+                        )
                         updateSymbolFromTick(token, symbol, ltp, change, changePercent, volume, timestamp)
+
+                        // Also emit live tick for indices and non-stock instruments
+                        scope.launch {
+                            _tickFlow.emit(
+                                LiveTick(
+                                    token = token,
+                                    symbol = symbol,
+                                    ltp = ltp,
+                                    volume = volume,
+                                    timestamp = timestamp
+                                )
+                            )
+                        }
                     }
                 }
                 "candle" -> {
@@ -372,53 +392,11 @@ class SmartApiBackendClient {
     }
 
     /**
-     * Standby fallback generator: ensures charts, indicators, and strategy scores
-     * remain fluid and responsive while the backend connection is establishing.
+     * Simulation fallback disabled for production Live Market mode.
+     * When disconnected, the app marks status as DISCONNECTED and shows Live Data Unavailable.
      */
     private fun startSimulationFallback() {
-        if (simulationFallbackJob?.isActive == true) return
-
-        simulationFallbackJob = scope.launch {
-            while (isActive && !isWebSocketActive) {
-                val currentList = _marketSymbols.value.toMutableList()
-                if (currentList.isNotEmpty()) {
-                    val index = Random.nextInt(currentList.size)
-                    val stock = currentList[index]
-
-                    val volatility = stock.ltp * 0.0006
-                    val delta = Random.nextDouble(-volatility, volatility * 1.02)
-                    val newPrice = kotlin.math.round((stock.ltp + delta) * 100.0) / 100.0
-                    val newChange = newPrice - stock.previousClose
-                    val newChangePercent = (newChange / stock.previousClose) * 100.0
-                    val newHigh = kotlin.math.max(stock.high, newPrice)
-                    val newLow = kotlin.math.min(stock.low, newPrice)
-                    val tickVol = Random.nextLong(100, 2000)
-
-                    val updatedStock = stock.copy(
-                        ltp = newPrice,
-                        change = kotlin.math.round(newChange * 100.0) / 100.0,
-                        changePercent = kotlin.math.round(newChangePercent * 100.0) / 100.0,
-                        high = newHigh,
-                        low = newLow,
-                        volume = stock.volume + tickVol,
-                        lastUpdated = System.currentTimeMillis()
-                    )
-                    currentList[index] = updatedStock
-                    _marketSymbols.value = currentList
-
-                    _tickFlow.emit(
-                        LiveTick(
-                            token = stock.token,
-                            symbol = stock.symbol,
-                            ltp = newPrice,
-                            volume = tickVol,
-                            timestamp = System.currentTimeMillis()
-                        )
-                    )
-                }
-                delay(Random.nextLong(400, 800))
-            }
-        }
+        // Disabled in LIVE mode to prevent displaying simulated/fake prices
     }
 
     private fun stopSimulationFallback() {

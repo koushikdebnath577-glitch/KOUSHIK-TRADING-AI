@@ -23,7 +23,6 @@ const SUPPORTED_INDICES = [
     token: '99926000',
     exchange: 'NSE',
     category: 'Broad Market',
-    basePrice: 24320.50,
     description: 'Flagship index tracking top 50 large-cap bluechip companies on NSE.',
     constituents: [
       'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'ITC', 'LT', 'BHARTIARTL',
@@ -43,7 +42,6 @@ const SUPPORTED_INDICES = [
     token: '99926004',
     exchange: 'NSE',
     category: 'Broad Market',
-    basePrice: 69450.30,
     description: 'Represents 50 potential NIFTY 50 candidates (large-cap index 51-100).',
     constituents: [
       'ZOMATO', 'JIOFIN', 'VEDL', 'HAL', 'CHOLAFIN', 'TORNTPHARM', 'DLF', 'SIEMENS',
@@ -63,7 +61,6 @@ const SUPPORTED_INDICES = [
     token: '99926009',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 51680.75,
     description: 'Tracks the 12 most liquid and capitalized Indian banking stocks.',
     constituents: [
       'HDFCBANK', 'ICICIBANK', 'SBIN', 'AXISBANK', 'KOTAKBANK', 'INDUSINDBK',
@@ -78,7 +75,6 @@ const SUPPORTED_INDICES = [
     token: '99926037',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 23140.20,
     description: 'Tracks banks, NBFCs, insurance, asset management, and fintech firms.',
     constituents: [
       'HDFCBANK', 'ICICIBANK', 'SBIN', 'AXISBANK', 'KOTAKBANK', 'BAJFINANCE',
@@ -94,7 +90,6 @@ const SUPPORTED_INDICES = [
     token: '99926008',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 41250.80,
     description: 'Top Indian information technology & software services leaders.',
     constituents: [
       'TCS', 'INFY', 'HCLTECH', 'WIPRO', 'TECHM', 'LTIM', 'PERSISTENT', 'COFORGE',
@@ -108,7 +103,6 @@ const SUPPORTED_INDICES = [
     token: '99926007',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 25420.10,
     description: 'Automobile manufacturers, EV makers, and auto ancillary giants.',
     constituents: [
       'MARUTI', 'TATAMOTORS', 'M&M', 'BAJAJ-AUTO', 'EICHERMOT', 'HEROMOTOCO',
@@ -123,7 +117,6 @@ const SUPPORTED_INDICES = [
     token: '99926005',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 58920.40,
     description: 'Fast-Moving Consumer Goods and household essentials companies.',
     constituents: [
       'HINDUNILVR', 'ITC', 'NESTLEIND', 'BRITANNIA', 'TATACONSUM', 'GODREJCP',
@@ -138,7 +131,6 @@ const SUPPORTED_INDICES = [
     token: '99926006',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 22840.60,
     description: 'Pharmaceutical manufacturers, healthcare research, and generic exporters.',
     constituents: [
       'SUNPHARMA', 'DRREDDY', 'CIPLA', 'DIVISLAB', 'ZYDUSLIFE', 'LUPIN',
@@ -154,7 +146,6 @@ const SUPPORTED_INDICES = [
     token: '99926011',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 9480.20,
     description: 'Ferrous, non-ferrous metals, mining, and steel manufacturing powerhouses.',
     constituents: [
       'TATASTEEL', 'JSWSTEEL', 'HINDALCO', 'VEDL', 'COALINDIA', 'JINDALSTEL',
@@ -169,7 +160,6 @@ const SUPPORTED_INDICES = [
     token: '99926018',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 1040.50,
     description: 'Residential, commercial real estate developers, and infrastructure firms.',
     constituents: [
       'DLF', 'MACROTECH', 'GODREJPROP', 'OBEROIRLTY', 'PHOENIXLTD', 'PRESTIGE',
@@ -183,7 +173,6 @@ const SUPPORTED_INDICES = [
     token: '99926010',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 2085.30,
     description: 'Broadcasting, film exhibition, digital entertainment, and print media.',
     constituents: [
       'ZEEL', 'SUNTV', 'PVRINOX', 'NETWORK18', 'TV18BRDCST', 'DISHTV', 'NAZARA',
@@ -197,7 +186,6 @@ const SUPPORTED_INDICES = [
     token: '99926013',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 39650.00,
     description: 'Oil, gas, thermal, hydro, and renewable energy conglomerates.',
     constituents: [
       'RELIANCE', 'NTPC', 'POWERGRID', 'ONGC', 'COALINDIA', 'BPCL', 'IOC',
@@ -212,7 +200,6 @@ const SUPPORTED_INDICES = [
     token: '99926014',
     exchange: 'NSE',
     category: 'Thematic',
-    basePrice: 8740.90,
     description: 'Construction, telecom, ports, power transmission, and logistics leaders.',
     constituents: [
       'RELIANCE', 'LT', 'BHARTIARTL', 'NTPC', 'POWERGRID', 'ULTRACEMCO', 'GRASIM',
@@ -229,7 +216,6 @@ const SUPPORTED_INDICES = [
     token: '99926038',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 14250.70,
     description: 'Hospitals, diagnostic chains, biopharma, and medical devices.',
     constituents: [
       'SUNPHARMA', 'DRREDDY', 'CIPLA', 'APOLLOHOSP', 'DIVISLAB', 'MAXHEALTH',
@@ -245,7 +231,6 @@ const SUPPORTED_INDICES = [
     token: '99926012',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 7120.40,
     description: 'Government-owned public sector banking institutions in India.',
     constituents: [
       'SBIN', 'BANKBARODA', 'PNB', 'CANBK', 'UNIONBANK', 'INDIANB', 'BANKINDIA',
@@ -259,7 +244,6 @@ const SUPPORTED_INDICES = [
     token: '99926039',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 26140.20,
     description: 'Top Indian private sector commercial banks.',
     constituents: [
       'HDFCBANK', 'ICICIBANK', 'AXISBANK', 'KOTAKBANK', 'INDUSINDBK', 'FEDERALBNK',
@@ -273,7 +257,6 @@ const SUPPORTED_INDICES = [
     token: '99926040',
     exchange: 'NSE',
     category: 'Sectoral',
-    basePrice: 38750.60,
     description: 'Electronics, home appliances, jewelry, and durable goods manufacturers.',
     constituents: [
       'TITAN', 'HAVELLS', 'DIXON', 'VOLTAS', 'BLUESTARCO', 'CROMPTON', 'WHIRLPOOL',
@@ -288,7 +271,6 @@ const SUPPORTED_INDICES = [
     token: '99926002',
     exchange: 'NSE',
     category: 'Broad Market',
-    basePrice: 16180.50,
     description: 'Top 50 high-growth mid-cap equities listed on NSE.',
     constituents: [
       'POLYCAB', 'TRENT', 'PERSISTENT', 'COFORGE', 'FEDERALBNK', 'IDFCFIRSTB',
@@ -308,7 +290,6 @@ const SUPPORTED_INDICES = [
     token: '99926015',
     exchange: 'NSE',
     category: 'Broad Market',
-    basePrice: 58450.90,
     description: 'Comprehensive 100 mid-sized growth enterprises across all sectors.',
     constituents: [
       'POLYCAB', 'TRENT', 'PERSISTENT', 'COFORGE', 'FEDERALBNK', 'IDFCFIRSTB',
@@ -336,7 +317,6 @@ const SUPPORTED_INDICES = [
     token: '99926016',
     exchange: 'NSE',
     category: 'Broad Market',
-    basePrice: 19120.30,
     description: 'Top 100 dynamic small-cap companies listed on National Stock Exchange.',
     constituents: [
       'SUZLON', 'EXIDEIND', 'CDSL', 'ANGELONE', 'BSE', 'HUDCO', 'NBCC', 'RITES',
@@ -362,7 +342,6 @@ const SUPPORTED_INDICES = [
     token: '99926001',
     exchange: 'NSE',
     category: 'Broad Market',
-    basePrice: 25190.80,
     description: 'Consolidated index tracking the top 100 large-cap companies in India.',
     constituents: [
       'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'ITC', 'LT', 'BHARTIARTL',
@@ -388,7 +367,6 @@ const SUPPORTED_INDICES = [
     token: '99926003',
     exchange: 'NSE',
     category: 'Broad Market',
-    basePrice: 13340.25,
     description: 'Broad market index tracking top 200 large and mid-cap Indian companies.',
     constituents: [
       'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'ITC', 'LT', 'BHARTIARTL',
@@ -425,7 +403,6 @@ const SUPPORTED_INDICES = [
     token: '99926017',
     exchange: 'NSE',
     category: 'Broad Market',
-    basePrice: 22890.10,
     description: 'Broadest market benchmark covering ~95% of total NSE market capitalization.',
     constituents: [
       'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'ITC', 'LT', 'BHARTIARTL',
@@ -596,24 +573,23 @@ class IndicesManager {
   }
 
   scheduleAutoRefresh() {
-    if (this.refreshTimer) clearInterval(this.refreshTimer);
-    // Refresh indices & constituent calculations every 60 seconds
-    this.refreshTimer = setInterval(() => {
-      this.updateLiveSimulatedPrices();
-    }, 60 * 1000);
-
-    if (this.refreshTimer.unref) this.refreshTimer.unref();
+    // In live mode, indices are updated strictly via real-time WebSocket ticks & REST quote polling
   }
 
-  updateLiveSimulatedPrices() {
-    for (const idx of this.indices) {
-      const drift = (Math.random() * 0.008) - 0.0038;
-      const ltp = Math.round(idx.basePrice * (1 + drift) * 100) / 100;
-      const prevClose = idx.basePrice;
-      const change = Math.round((ltp - prevClose) * 100) / 100;
-      const changePercent = Math.round((change / prevClose) * 10000) / 100;
-      const high = Math.round(Math.max(ltp, prevClose * 1.006) * 100) / 100;
-      const low = Math.round(Math.min(ltp, prevClose * 0.994) * 100) / 100;
+  /**
+   * Update index state from real Angel One live tick
+   */
+  updateIndexFromTick(token, ltp, change = 0.0, changePercent = 0.0, high = ltp, low = ltp, prevClose = 0.0) {
+    if (!token || ltp <= 0) return;
+
+    const matchedIndices = this.indices.filter(idx => String(idx.token) === String(token));
+    for (const idx of matchedIndices) {
+      const existing = this.liveIndicesCache.get(idx.symbol.toUpperCase());
+      const calculatedPrevClose = prevClose > 0 ? prevClose : (existing?.prevClose > 0 ? existing.prevClose : (change !== 0 ? (ltp - change) : ltp));
+      const calculatedChange = change !== 0 ? change : (calculatedPrevClose > 0 ? Math.round((ltp - calculatedPrevClose) * 100) / 100 : 0.0);
+      const calculatedPct = changePercent !== 0 ? changePercent : (calculatedPrevClose > 0 ? Math.round((calculatedChange / calculatedPrevClose) * 10000) / 100 : 0.0);
+      const newHigh = existing && existing.high > 0 ? Math.max(existing.high, ltp, high) : Math.max(ltp, high);
+      const newLow = existing && existing.low > 0 ? Math.min(existing.low, ltp, low) : Math.min(ltp, low);
 
       this.liveIndicesCache.set(idx.symbol.toUpperCase(), {
         id: idx.id,
@@ -624,15 +600,18 @@ class IndicesManager {
         exchange: idx.exchange,
         category: idx.category,
         ltp,
-        change,
-        changePercent,
-        high,
-        low,
-        prevClose,
+        change: calculatedChange,
+        changePercent: calculatedPct,
+        high: newHigh,
+        low: newLow,
+        prevClose: calculatedPrevClose,
         constituentCount: idx.constituents.length,
         description: idx.description,
+        isLive: true,
+        status: 'LIVE',
         lastUpdated: new Date().toISOString()
       });
+      console.log(`[IndicesManager Real Tick] Updated Index ${idx.symbol} (${idx.token}) -> LTP: ${ltp}, Change: ${calculatedChange} (${calculatedPct}%)`);
     }
 
     this.lastRefreshTime = new Date();
@@ -656,15 +635,17 @@ class IndicesManager {
           token: idx.token,
           exchange: idx.exchange,
           category: idx.category,
-          ltp: idx.basePrice,
+          ltp: 0.0,
           change: 0.0,
           changePercent: 0.0,
-          high: idx.basePrice,
-          low: idx.basePrice,
-          prevClose: idx.basePrice,
+          high: 0.0,
+          low: 0.0,
+          prevClose: 0.0,
           constituentCount: idx.constituents.length,
           description: idx.description,
-          lastUpdated: new Date().toISOString()
+          isLive: false,
+          status: 'AWAITING_LIVE_FEED',
+          lastUpdated: null
         });
       }
     }
@@ -704,15 +685,17 @@ class IndicesManager {
       token: indexDef.token,
       exchange: indexDef.exchange,
       category: indexDef.category,
-      ltp: indexDef.basePrice,
+      ltp: 0.0,
       change: 0.0,
       changePercent: 0.0,
-      high: indexDef.basePrice,
-      low: indexDef.basePrice,
-      prevClose: indexDef.basePrice,
+      high: 0.0,
+      low: 0.0,
+      prevClose: 0.0,
       constituentCount: indexDef.constituents.length,
       description: indexDef.description,
-      lastUpdated: new Date().toISOString()
+      isLive: false,
+      status: 'AWAITING_LIVE_FEED',
+      lastUpdated: null
     };
   }
 
@@ -729,8 +712,6 @@ class IndicesManager {
       const cleanSym = sym.replace(/-EQ$/i, '').toUpperCase();
       const baseInfo = STOCK_INFO_MAP[cleanSym] || {
         name: `${cleanSym} LTD`,
-        ltp: 1250.00,
-        prevClose: 1240.00,
         token: '1000',
         sector: 'Diversified'
       };
@@ -746,15 +727,6 @@ class IndicesManager {
         }
       }
 
-      // Generate realistic live intraday price movement
-      const drift = (Math.random() * 0.015) - 0.007;
-      const ltp = Math.round(baseInfo.ltp * (1 + drift) * 100) / 100;
-      const change = Math.round((ltp - baseInfo.prevClose) * 100) / 100;
-      const changePercent = Math.round((change / baseInfo.prevClose) * 10000) / 100;
-      const high = Math.round(Math.max(ltp, baseInfo.prevClose * 1.01) * 100) / 100;
-      const low = Math.round(Math.min(ltp, baseInfo.prevClose * 0.99) * 100) / 100;
-      const volume = Math.floor(Math.random() * 2500000) + 150000;
-
       results.push({
         symbol: cleanSym,
         tradingSymbol: `${cleanSym}-EQ`,
@@ -762,16 +734,17 @@ class IndicesManager {
         token: resolvedToken,
         exchange: 'NSE',
         instrumentType: 'EQ',
-        ltp,
-        change,
-        changePercent,
-        high,
-        low,
-        open: baseInfo.prevClose * 1.002,
-        previousClose: baseInfo.prevClose,
-        volume,
+        ltp: 0.0,
+        change: 0.0,
+        changePercent: 0.0,
+        high: 0.0,
+        low: 0.0,
+        open: 0.0,
+        previousClose: 0.0,
+        volume: 0,
         sector: baseInfo.sector,
-        lastUpdated: new Date().toISOString()
+        isLive: false,
+        lastUpdated: null
       });
     }
 

@@ -514,6 +514,9 @@ class UpstreamMarketFeed {
     const change = stockInfo.prevClose > 0 ? Math.round((ltp - stockInfo.prevClose) * 100) / 100 : 0.0;
     const changePercent = stockInfo.prevClose > 0 ? Math.round((change / stockInfo.prevClose) * 10000) / 100 : 0.0;
 
+    // Update IndicesManager if token matches an index
+    indicesManager.updateIndexFromTick(token, ltp, change, changePercent, ltp, ltp, stockInfo.prevClose);
+
     const tickPayload = {
       type: 'tick',
       token,
@@ -527,6 +530,8 @@ class UpstreamMarketFeed {
       volume: volume || 0,
       timestamp: Date.now()
     };
+
+    console.log(`[DATA AUDIT: BACKEND FORWARD] Symbol: ${stockInfo.symbol} | Exchange: ${stockInfo.exchange || 'NSE'} | Token: ${token} | Timestamp: ${tickPayload.timestamp} | Angel One LTP: ${angelOneLtp} | Backend Forwarded LTP: ${backendForwardedLtp}`);
 
     // Aggregate into 1s, 5s, 15s, 30s candles
     const updatedCandles = candleAggregator.processTick(token, ltp, volume, tickPayload.timestamp);
@@ -547,26 +552,7 @@ class UpstreamMarketFeed {
   }
 
   startSimulationFeed() {
-    if (this.simulationInterval) return;
-    console.log('[Market Feed] Starting high-fidelity market tick generator (Simulation / Standby)...');
-
-    this.simulationInterval = setInterval(() => {
-      const tokens = Array.from(this.subscribedTokens);
-      if (tokens.length === 0) return;
-
-      const randomToken = tokens[Math.floor(Math.random() * tokens.length)];
-      const stock = tokenMap.get(randomToken);
-      if (!stock) return;
-
-      // Realistic tick delta
-      const volatility = stock.ltp * 0.0006;
-      const delta = (Math.random() * volatility * 2) - volatility;
-      const newLtp = Math.round((stock.ltp + delta) * 100) / 100;
-      stock.ltp = newLtp;
-
-      const tickVol = Math.floor(Math.random() * 2000) + 100;
-      this.broadcastTick(stock.token, newLtp, tickVol);
-    }, 400); // Ticks every 400ms for realistic intraday dynamics
+    // In live mode, simulation is strictly disabled to prevent fake/stale prices
   }
 
   stopSimulationFeed() {
@@ -581,12 +567,54 @@ class UpstreamMarketFeed {
     this.reconnectTimeout = setTimeout(() => {
       if (isAngelConfigured()) {
         authManager.login().then(() => this.connect());
-      } else {
-        this.startSimulationFeed();
       }
     }, 3000);
   }
 }
+
+// Periodic live quote poller from Angel One SmartAPI REST
+async function pollAngelOneQuotes() {
+  if (!isAngelConfigured() || !authManager.isAuthenticated) return;
+  try {
+    const tokens = ['99926000', '99926009', '99926037', '99926008', '99926004', '99926001', '99926002', '99926005', '99926006', '99926011', '99926018', '99926010', '99926013', '99926014', '2885', '1333', '11536', '1594', '3045'];
+    const response = await axios.post(
+      `${SMARTAPI_BASE_URL}/rest/secure/angelbroking/market/v1/quote/`,
+      {
+        mode: 'FULL',
+        exchangeTokens: {
+          NSE: tokens
+        }
+      },
+      {
+        headers: authManager.getHeaders(),
+        timeout: 8000
+      }
+    );
+
+    if (response.data && response.data.status && response.data.data && response.data.data.fetched) {
+      const fetchedList = response.data.data.fetched;
+      for (const item of fetchedList) {
+        const token = String(item.symbolToken || item.token || '');
+        const ltp = Number(item.ltp || item.lastPrice || 0);
+        const change = Number(item.netChange || item.change || 0);
+        const changePercent = Number(item.percentChange || item.changePercent || 0);
+        const high = Number(item.high || ltp);
+        const low = Number(item.low || ltp);
+        const prevClose = Number(item.close || (ltp - change));
+
+        if (token && ltp > 0) {
+          console.log(`[SmartAPI Live Quote Audit] Token: ${token} | Symbol: ${item.tradingSymbol} | Raw Angel LTP: ${ltp} | PrevClose: ${prevClose}`);
+          upstreamMarketFeed.broadcastTick(token, ltp, 0, ltp, ltp);
+          indicesManager.updateIndexFromTick(token, ltp, change, changePercent, high, low, prevClose);
+        }
+      }
+    }
+  } catch (err) {
+    // Polling failure handled gracefully
+  }
+}
+
+setInterval(pollAngelOneQuotes, 5000);
 
 const upstreamMarketFeed = new UpstreamMarketFeed();
 

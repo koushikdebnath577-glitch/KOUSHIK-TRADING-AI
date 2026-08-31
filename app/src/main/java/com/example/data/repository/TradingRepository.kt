@@ -63,6 +63,15 @@ class TradingRepository(
         // Initial setup for default symbol
         loadCandlesForSelected()
 
+        // Fetch latest live indices from backend
+        scope.launch {
+            try {
+                refreshIndices()
+            } catch (e: Exception) {
+                // Handled gracefully
+            }
+        }
+
         // Collect incoming live ticks
         scope.launch {
             smartApiClient.tickFlow.collect { tick ->
@@ -135,6 +144,33 @@ class TradingRepository(
     }
 
     private fun handleLiveTick(tick: LiveTick) {
+        // Update index state if this tick belongs to an index
+        val currentIndices = _indices.value.toMutableList()
+        val indexIdx = currentIndices.indexOfFirst {
+            it.token == tick.token ||
+            it.symbol.equals(tick.symbol, ignoreCase = true) ||
+            (it.alias != null && it.alias.equals(tick.symbol, ignoreCase = true))
+        }
+        if (indexIdx >= 0) {
+            val oldIdx = currentIndices[indexIdx]
+            val prevClose = if (oldIdx.prevClose > 0) oldIdx.prevClose else tick.ltp
+            val change = tick.ltp - prevClose
+            val changePercent = if (prevClose > 0) (change / prevClose) * 100.0 else 0.0
+            val high = if (oldIdx.high > 0) kotlin.math.max(oldIdx.high, tick.ltp) else tick.ltp
+            val low = if (oldIdx.low > 0) kotlin.math.min(oldIdx.low, tick.ltp) else tick.ltp
+
+            currentIndices[indexIdx] = oldIdx.copy(
+                ltp = tick.ltp,
+                change = kotlin.math.round(change * 100.0) / 100.0,
+                changePercent = kotlin.math.round(changePercent * 100.0) / 100.0,
+                high = high,
+                low = low,
+                prevClose = prevClose
+            )
+            _indices.value = currentIndices
+            android.util.Log.i("DATA_AUDIT", "[DATA AUDIT: REPOSITORY UPDATED INDEX] Symbol: ${oldIdx.symbol} | Token: ${oldIdx.token} | Live LTP: ${tick.ltp}")
+        }
+
         if (tick.symbol == _selectedSymbol.value) {
             val agg = aggregator ?: return
             val updatedCandle = agg.processTick(tick)

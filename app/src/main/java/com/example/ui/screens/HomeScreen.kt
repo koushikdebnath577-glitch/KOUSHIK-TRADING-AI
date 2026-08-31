@@ -365,6 +365,12 @@ private fun IndexCard(
             .width(160.dp)
             .testTag("index_card_${index.symbol}")
     ) {
+        // Audit log for HomeScreen displayed value
+        android.util.Log.i(
+            "DATA_AUDIT",
+            "[DATA AUDIT: HOMESCREEN DISPLAY] Index: ${index.symbol} | Token: ${index.token} | Displayed Value: ${if (index.ltp > 0) "₹" + String.format(java.util.Locale.US, "%,.2f", index.ltp) else "LIVE DATA UNAVAILABLE"}"
+        )
+
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -393,27 +399,42 @@ private fun IndexCard(
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "₹${String.format(java.util.Locale.US, "%,.2f", index.ltp)}",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                color = TextPrimary
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            if (index.ltp > 0.0) {
                 Text(
-                    text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.changePercent)}%",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isPos) BullishGreen else BearishRed
+                    text = "₹${String.format(java.util.Locale.US, "%,.2f", index.ltp)}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    color = TextPrimary
                 )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.changePercent)}%",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isPos) BullishGreen else BearishRed
+                    )
+                    Text(
+                        text = index.category,
+                        fontSize = 8.sp,
+                        color = TextTertiary
+                    )
+                }
+            } else {
                 Text(
-                    text = index.category,
+                    text = "Live data unavailable",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextTertiary
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Awaiting Live Feed",
                     fontSize = 8.sp,
                     color = TextTertiary
                 )
@@ -497,19 +518,28 @@ fun StockItemCard(
             }
 
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "₹${String.format(java.util.Locale.US, "%.2f", stock.ltp)}",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    color = TextPrimary
-                )
-                Text(
-                    text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.change)} (${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%)",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (isPos) BullishGreen else BearishRed
-                )
+                if (stock.ltp > 0.0) {
+                    Text(
+                        text = "₹${String.format(java.util.Locale.US, "%.2f", stock.ltp)}",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.change)} (${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (isPos) BullishGreen else BearishRed
+                    )
+                } else {
+                    Text(
+                        text = "Live data unavailable",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextTertiary
+                    )
+                }
             }
         }
     }
