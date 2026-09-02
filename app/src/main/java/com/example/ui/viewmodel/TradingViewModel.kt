@@ -20,7 +20,7 @@ data class TradingUiState(
     val selectedStock: StockSymbol? = null,
     val selectedTimeframe: Timeframe = Timeframe.MIN_1,
     val selectedStrategy: StrategyType = StrategyType.RESISTANCE_REJECTION,
-    val connectionStatus: ConnectionStatus = ConnectionStatus.LIVE,
+    val connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTING,
     val candles: List<Candle> = emptyList(),
     val keyLevels: List<KeyLevel> = emptyList(),
     val analysisResult: AnalysisResult? = null,
@@ -100,11 +100,41 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         viewModelScope.launch {
-            repository.marketSymbols.collect { symbols ->
-                val currentSym = _uiState.value.selectedSymbol
-                val stock = symbols.find { it.symbol == currentSym }
+            combine(
+                repository.selectedSymbol,
+                repository.marketSymbols,
+                repository.indices
+            ) { currentSym, symbols, indicesList ->
+                val stockFromMarket = symbols.find { it.symbol.equals(currentSym, ignoreCase = true) }
+                val stock = if (stockFromMarket != null && stockFromMarket.ltp > 0.0) {
+                    stockFromMarket
+                } else {
+                    val matchingIndex = indicesList.find {
+                        it.symbol.equals(currentSym, ignoreCase = true) ||
+                        (it.alias != null && it.alias.equals(currentSym, ignoreCase = true))
+                    }
+                    if (matchingIndex != null) {
+                        StockSymbol(
+                            symbol = matchingIndex.symbol,
+                            name = matchingIndex.name,
+                            token = matchingIndex.token,
+                            exchange = matchingIndex.exchange,
+                            ltp = matchingIndex.ltp,
+                            change = matchingIndex.change,
+                            changePercent = matchingIndex.changePercent,
+                            open = matchingIndex.prevClose,
+                            high = matchingIndex.high,
+                            low = matchingIndex.low,
+                            close = matchingIndex.ltp,
+                            volume = 0L,
+                            previousClose = matchingIndex.prevClose
+                        )
+                    } else {
+                        stockFromMarket
+                    }
+                }
                 _uiState.update { it.copy(selectedStock = stock) }
-            }
+            }.collect()
         }
         viewModelScope.launch {
             combine(

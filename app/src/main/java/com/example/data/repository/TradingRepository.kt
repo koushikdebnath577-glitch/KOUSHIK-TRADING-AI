@@ -79,6 +79,46 @@ class TradingRepository(
             }
         }
 
+        // Synchronize _indices whenever marketSymbols get updated (from REST quote or WebSocket)
+        scope.launch {
+            smartApiClient.marketSymbols.collect { symbols ->
+                val currentIndices = _indices.value.toMutableList()
+                var updated = false
+                symbols.forEach { sym ->
+                    val idx = currentIndices.indexOfFirst {
+                        it.token == sym.token ||
+                        it.symbol.equals(sym.symbol, ignoreCase = true) ||
+                        (it.alias != null && it.alias.equals(sym.symbol, ignoreCase = true))
+                    }
+                    if (idx >= 0) {
+                        val old = currentIndices[idx]
+                        if (sym.ltp > 0.0 || sym.previousClose > 0.0) {
+                            currentIndices[idx] = old.copy(
+                                ltp = sym.ltp,
+                                change = sym.change,
+                                changePercent = sym.changePercent,
+                                high = if (sym.high > 0.0) sym.high else sym.ltp,
+                                low = if (sym.low > 0.0) sym.low else sym.ltp,
+                                prevClose = if (sym.previousClose > 0.0) sym.previousClose else old.prevClose
+                            )
+                            updated = true
+                            android.util.Log.i("HOME_DISPLAY", "[HOME_DISPLAY] Updated Index: ${old.symbol} (Token: ${old.token}) LTP: ${sym.ltp} PrevClose: ${sym.previousClose}")
+                        }
+                    }
+                }
+                if (updated) {
+                    _indices.value = currentIndices
+                }
+            }
+        }
+
+        // Recompute analysis whenever connection status changes (e.g. from LIVE to DISCONNECTED/AWAITING)
+        scope.launch {
+            smartApiClient.connectionStatus.collect {
+                recomputeAnalysis()
+            }
+        }
+
         // Initialize default watchlist items if empty
         scope.launch {
             val currentList = appDao.getAllWatchlist().first()
@@ -138,9 +178,54 @@ class TradingRepository(
         val symbol = _selectedSymbol.value
         val tf = _selectedTimeframe.value
         val baseCandles = smartApiClient.getHistoricalCandles(symbol, tf)
-        aggregator = CandleAggregator(tf, baseCandles)
-        _activeCandles.value = aggregator?.candles ?: baseCandles
-        recomputeAnalysis()
+
+        if (baseCandles.isNotEmpty()) {
+            aggregator = CandleAggregator(tf, baseCandles)
+            _activeCandles.value = aggregator?.candles ?: baseCandles
+
+            val stock = marketSymbols.value.find { it.symbol == symbol }
+            val ltp = stock?.ltp ?: baseCandles.last().close
+            val prevClose = stock?.previousClose ?: ltp
+            _keyLevels.value = KeyLevelDetector.detectKeyLevels(baseCandles, ltp, prevClose)
+            recomputeAnalysis()
+        } else {
+            // Find token and exchange
+            val stock = marketSymbols.value.find { it.symbol == symbol }
+            val token = stock?.token ?: when (symbol) {
+                "NIFTY 50" -> "99926000"
+                "BANKNIFTY", "NIFTY BANK" -> "99926009"
+                "FINNIFTY", "NIFTY FINANCIAL SERVICES" -> "99926037"
+                "RELIANCE" -> "2885"
+                "HDFCBANK" -> "1333"
+                "TCS" -> "11536"
+                "INFY" -> "1594"
+                "ICICIBANK" -> "4963"
+                "TATAMOTORS" -> "3456"
+                "SBIN" -> "3045"
+                "ITC" -> "1660"
+                "BHARTIARTL" -> "10604"
+                "LT" -> "11483"
+                else -> "99926000"
+            }
+            val exch = stock?.exchange ?: "NSE"
+
+            scope.launch {
+                val fetchedCandles = smartApiClient.fetchCandles(token, exch, tf)
+                if (fetchedCandles.isNotEmpty()) {
+                    aggregator = CandleAggregator(tf, fetchedCandles)
+                    _activeCandles.value = aggregator?.candles ?: fetchedCandles
+
+                    val currentStock = marketSymbols.value.find { it.symbol == symbol }
+                    val currentLtp = currentStock?.ltp ?: fetchedCandles.last().close
+                    val prevClose = currentStock?.previousClose ?: currentLtp
+                    _keyLevels.value = KeyLevelDetector.detectKeyLevels(fetchedCandles, currentLtp, prevClose)
+                    recomputeAnalysis()
+                } else {
+                    _activeCandles.value = emptyList()
+                    recomputeAnalysis()
+                }
+            }
+        }
     }
 
     private fun handleLiveTick(tick: LiveTick) {
@@ -193,15 +278,22 @@ class TradingRepository(
         val stock = marketSymbols.value.find { it.symbol == symbol }
         val ltp = stock?.ltp ?: candles.last().close
         val prevClose = stock?.previousClose ?: ltp
+        val isLive = smartApiClient.connectionStatus.value == ConnectionStatus.LIVE
 
         val result = TradingAnalysisEngine.performFullAnalysis(
             symbol = symbol,
             currentPrice = ltp,
             previousClose = prevClose,
             candles = candles,
-            strategyType = _selectedStrategy.value
+            strategyType = _selectedStrategy.value,
+            isLiveFeed = isLive
         )
         _analysisResult.value = result
+
+        android.util.Log.i(
+            "ANALYZE_DISPLAY",
+            "[ANALYZE_DISPLAY] Symbol: $symbol | Strategy: ${_selectedStrategy.value.displayName} | Price: $ltp | PrevClose: $prevClose | CandlesCount: ${candles.size} | LiveFeed: $isLive | Score: ${result.setupScore} | Direction: ${result.direction.label} | Status: ${result.strategyStatus}"
+        )
     }
 
     fun isSymbolInWatchlist(symbol: String): Flow<Boolean> = appDao.isInWatchlist(symbol)

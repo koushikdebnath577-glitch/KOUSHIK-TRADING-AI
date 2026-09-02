@@ -153,6 +153,7 @@ fun TradingAppRoot(
                     constituents = uiState.indexConstituents,
                     loadingState = uiState.constituentsLoadingState,
                     watchlist = watchlist,
+                    connectionStatus = uiState.connectionStatus,
                     onBack = { viewModel.closeIndexDetail() },
                     onRefresh = { viewModel.loadConstituentsForIndex(uiState.selectedIndex!!) },
                     onSelectStockAndAnalyze = { symbol, strategy ->
@@ -170,6 +171,7 @@ fun TradingAppRoot(
                     0 -> HomeScreen(
                         symbols = marketSymbols,
                         indices = uiState.indices,
+                        connectionStatus = uiState.connectionStatus,
                         defaultRiskAmount = uiState.defaultRiskAmount,
                         onEditRisk = { showEditRiskDialog = true },
                         onSelectIndex = { viewModel.openIndexDetail(it) },
@@ -184,6 +186,7 @@ fun TradingAppRoot(
                     1 -> MarketsScreen(
                         symbols = marketSymbols,
                         indices = uiState.indices,
+                        connectionStatus = uiState.connectionStatus,
                         watchlist = watchlist,
                         searchQuery = uiState.searchQuery,
                         onSearchQueryChange = { viewModel.updateSearchQuery(it) },
@@ -224,6 +227,7 @@ fun TradingAppRoot(
                     3 -> WatchlistScreen(
                         watchlist = watchlist,
                         marketSymbols = marketSymbols,
+                        connectionStatus = uiState.connectionStatus,
                         savedPlans = savedPlans,
                         alerts = alerts,
                         onSelectStock = { symbol ->

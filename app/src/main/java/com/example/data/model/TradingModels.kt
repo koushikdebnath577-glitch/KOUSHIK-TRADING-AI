@@ -173,14 +173,13 @@ data class AnalysisResult(
 )
 
 enum class ConnectionStatus(val label: String) {
-    CONNECTED("CONNECTED"),
     CONNECTING("CONNECTING"),
-    DISCONNECTED("DISCONNECTED");
+    CONNECTED_WAITING_FOR_TICK("WAITING FOR TICK"),
+    LIVE("LIVE"),
+    DISCONNECTED("DISCONNECTED"),
+    ERROR("ERROR");
 
-    companion object {
-        val LIVE = CONNECTED
-        val RECONNECTING = CONNECTING
-    }
+    val isLive: Boolean get() = this == LIVE
 }
 
 data class TradeAlert(

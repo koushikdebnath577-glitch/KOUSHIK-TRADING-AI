@@ -76,7 +76,8 @@ class TradingEngineTest {
             currentPrice = 25050.0,
             previousClose = 24950.0,
             candles = candles,
-            strategyType = StrategyType.RESISTANCE_REJECTION
+            strategyType = StrategyType.RESISTANCE_REJECTION,
+            isLiveFeed = true
         )
 
         assertNotNull(result)
@@ -95,7 +96,8 @@ class TradingEngineTest {
             currentPrice = 25200.0,
             previousClose = 24900.0,
             candles = candles,
-            strategyType = StrategyType.MORNING_BREAKOUT
+            strategyType = StrategyType.MORNING_BREAKOUT,
+            isLiveFeed = true
         )
 
         assertNotNull(result)

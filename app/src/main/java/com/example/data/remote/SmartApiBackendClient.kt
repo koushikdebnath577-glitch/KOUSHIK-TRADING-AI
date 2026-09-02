@@ -38,10 +38,17 @@ data class BackendConfig(
     val clientIp: String = "192.168.1.1",
     val macAddress: String = "00:1A:2B:3C:4D:5E"
 ) {
+    val apiBaseUrl: String
+        get() {
+            val trimmed = serverUrl.trim().removeSuffix("/")
+            return if (trimmed.endsWith("/api")) trimmed else "$trimmed/api"
+        }
+
     val healthUrl: String
         get() {
-            val base = if (serverUrl.endsWith("/api")) serverUrl.removeSuffix("/api") else serverUrl
-            return "$base/health"
+            val trimmed = serverUrl.trim().removeSuffix("/")
+            val root = if (trimmed.endsWith("/api")) trimmed.removeSuffix("/api") else trimmed
+            return "$root/health"
         }
 }
 
@@ -49,9 +56,10 @@ class SmartApiBackendClient {
 
     companion object {
         private const val TAG = "SmartApiBackendClient"
-        const val DEFAULT_API_BASE_URL = "https://koushik-trading-ai.onrender.com/api"
+        const val PRODUCTION_BASE_URL = "https://koushik-trading-ai.onrender.com"
+        const val DEFAULT_API_BASE_URL = "$PRODUCTION_BASE_URL/api"
+        const val DEFAULT_HEALTH_URL = "$PRODUCTION_BASE_URL/health"
         const val DEFAULT_WS_URL = "wss://koushik-trading-ai.onrender.com/ws/market"
-        const val DEFAULT_HEALTH_URL = "https://koushik-trading-ai.onrender.com/health"
     }
 
     private val _connectionStatus = MutableStateFlow(ConnectionStatus.CONNECTING)
@@ -66,19 +74,21 @@ class SmartApiBackendClient {
     private var backendConfig = BackendConfig()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // OkHttp Client with WebSocket and REST support
+    // OkHttp Client with production timeouts (30s connect/read/write to accommodate Render cold starts)
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
-        .pingInterval(15, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(45, TimeUnit.SECONDS)
+        .pingInterval(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
-    private var simulationFallbackJob: Job? = null
+    private var quoteSyncJob: Job? = null
     private var isWebSocketActive = false
+    private var lastTickReceivedAt: Long = 0L
 
     // In-memory cache of candle history per symbol + timeframe
     private val candleCache = mutableMapOf<String, MutableList<Candle>>()
@@ -86,28 +96,44 @@ class SmartApiBackendClient {
     init {
         initializeSymbols()
         startConnectionLifecycle()
+        startFreshnessMonitor()
+    }
+
+    private fun startFreshnessMonitor() {
+        scope.launch {
+            while (true) {
+                delay(3000)
+                if (_connectionStatus.value == ConnectionStatus.LIVE) {
+                    if (System.currentTimeMillis() - lastTickReceivedAt > 15_000L) {
+                        Log.w(TAG, "[FRESHNESS CHECK] No ticks received for >15s. Updating status to CONNECTED_WAITING_FOR_TICK")
+                        _connectionStatus.value = ConnectionStatus.CONNECTED_WAITING_FOR_TICK
+                    }
+                }
+            }
+        }
     }
 
     private fun initializeSymbols() {
         val initialList = listOf(
-            StockSymbol("NIFTY 50", "NIFTY 50 INDEX", "99926000", "NSE", 24320.50, 142.80, 0.59, 24190.00, 24365.20, 24175.40, 24177.70, 48200000, 24177.70),
-            StockSymbol("BANKNIFTY", "NIFTY BANK INDEX", "99926009", "NSE", 51680.75, -120.30, -0.23, 51850.00, 51920.00, 51580.00, 51801.05, 32100000, 51801.05),
-            StockSymbol("RELIANCE", "Reliance Industries Ltd", "2885", "NSE", 2980.40, 32.60, 1.11, 2955.00, 2992.00, 2948.00, 2947.80, 5420000, 2947.80),
-            StockSymbol("HDFCBANK", "HDFC Bank Ltd", "1333", "NSE", 1642.15, -8.45, -0.51, 1655.00, 1660.00, 1638.50, 1650.60, 8910000, 1650.60),
-            StockSymbol("TCS", "Tata Consultancy Services", "11536", "NSE", 4185.00, 45.20, 1.09, 4145.00, 4205.00, 4138.00, 4139.80, 2340000, 4139.80),
-            StockSymbol("INFY", "Infosys Ltd", "1594", "NSE", 1795.50, 21.30, 1.20, 1778.00, 1805.00, 1772.00, 1774.20, 6120000, 1774.20),
-            StockSymbol("ICICIBANK", "ICICI Bank Ltd", "4963", "NSE", 1198.80, 14.20, 1.20, 1188.00, 1204.00, 1185.00, 1184.60, 7840000, 1184.60),
-            StockSymbol("TATAMOTORS", "Tata Motors Ltd", "3456", "NSE", 984.60, -12.40, -1.24, 1002.00, 1005.00, 980.20, 997.00, 9530000, 997.00),
-            StockSymbol("SBIN", "State Bank of India", "3045", "NSE", 812.30, 3.80, 0.47, 810.00, 818.50, 807.00, 808.50, 11200000, 808.50),
-            StockSymbol("ITC", "ITC Ltd", "1660", "NSE", 468.90, -1.20, -0.26, 471.00, 473.00, 467.50, 470.10, 4510000, 470.10),
-            StockSymbol("BHARTIARTL", "Bharti Airtel Ltd", "10604", "NSE", 1485.00, 18.50, 1.26, 1470.00, 1492.00, 1466.00, 1466.50, 3900000, 1466.50),
-            StockSymbol("LT", "Larsen & Toubro Ltd", "11483", "NSE", 3620.00, -25.00, -0.69, 3650.00, 3662.00, 3608.00, 3645.00, 1820000, 3645.00)
+            StockSymbol("NIFTY 50", "NIFTY 50 INDEX", "99926000", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("BANKNIFTY", "NIFTY BANK INDEX", "99926009", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("RELIANCE", "Reliance Industries Ltd", "2885", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("HDFCBANK", "HDFC Bank Ltd", "1333", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("TCS", "Tata Consultancy Services", "11536", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("INFY", "Infosys Ltd", "1594", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("ICICIBANK", "ICICI Bank Ltd", "4963", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("TATAMOTORS", "Tata Motors Ltd", "3456", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("SBIN", "State Bank of India", "3045", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("ITC", "ITC Ltd", "1660", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("BHARTIARTL", "Bharti Airtel Ltd", "10604", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("LT", "Larsen & Toubro Ltd", "11483", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0)
         )
         _marketSymbols.value = initialList
     }
 
     fun updateConfig(config: BackendConfig) {
         backendConfig = config
+        Log.i(TAG, "[BACKEND CONFIG UPDATED]\nBACKEND URL: ${backendConfig.apiBaseUrl}\nHEALTH URL: ${backendConfig.healthUrl}\nWS URL: ${backendConfig.wsUrl}")
         reconnect()
     }
 
@@ -125,51 +151,82 @@ class SmartApiBackendClient {
 
     private fun startConnectionLifecycle() {
         scope.launch {
+            Log.i(TAG, "[BACKEND INITIALIZATION]\nBACKEND URL: ${backendConfig.apiBaseUrl}\nHEALTH URL: ${backendConfig.healthUrl}\nWS URL: ${backendConfig.wsUrl}")
             connectToBackend()
         }
     }
 
     /**
-     * 1. Performs GET /health check
-     * 2. Establishes WebSocket connection to /ws/market
+     * 1. Performs GET /health check with exponential backoff for Render cold starts
+     * 2. Establishes WebSocket connection to wss://koushik-trading-ai.onrender.com/ws/market
      * 3. Starts automatic reconnection if network drops
      */
     private suspend fun connectToBackend() {
         _connectionStatus.value = ConnectionStatus.CONNECTING
-        Log.d(TAG, "Connecting to Render backend: ${backendConfig.serverUrl} and WS: ${backendConfig.wsUrl}")
+        Log.i(TAG, "[CONNECT TO BACKEND]\nBACKEND URL: ${backendConfig.apiBaseUrl}\nHEALTH URL: ${backendConfig.healthUrl}\nWS URL: ${backendConfig.wsUrl}\nWebSocket connection state: ${_connectionStatus.value.label}")
 
-        // 1. Perform Health Check
+        // 1. Perform Health Check with retry
         val isHealthOk = performHealthCheck()
-        Log.d(TAG, "Health check result: $isHealthOk")
+        Log.i(TAG, "[HEALTH CHECK RESULT] Health OK: $isHealthOk | HEALTH URL: ${backendConfig.healthUrl}")
 
         // 2. Establish WebSocket connection
         startWebSocket()
     }
 
     /**
-     * Calls GET /health on the deployed backend
+     * Calls GET /health on the deployed backend with retry logic to handle cold start delays.
      */
     private suspend fun performHealthCheck(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder()
-                .url(backendConfig.healthUrl)
-                .get()
-                .build()
+        val targetHealthUrl = backendConfig.healthUrl
+        val maxRetries = 4
+        val backoffDelays = listOf(0L, 2000L, 4000L, 6000L)
 
-            okHttpClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: ""
-                    Log.d(TAG, "Health Check Success: $body")
-                    true
-                } else {
-                    Log.w(TAG, "Health Check HTTP ${response.code}")
-                    false
-                }
+        for (attempt in 1..maxRetries) {
+            if (backoffDelays[attempt - 1] > 0L) {
+                Log.d(TAG, "Waiting ${backoffDelays[attempt - 1]}ms before health check retry (Attempt $attempt/$maxRetries)...")
+                delay(backoffDelays[attempt - 1])
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Health Check Exception: ${e.message}")
-            false
+
+            Log.i(TAG, "[HEALTH CHECK ATTEMPT $attempt/$maxRetries] Requesting HEALTH URL: $targetHealthUrl (BACKEND URL: ${backendConfig.apiBaseUrl})")
+
+            try {
+                val request = Request.Builder()
+                    .url(targetHealthUrl)
+                    .get()
+                    .build()
+
+                okHttpClient.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val body = response.body?.string() ?: ""
+
+                    Log.i(
+                        TAG,
+                        "[HEALTH CHECK HTTP RESPONSE]\n" +
+                        "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
+                        "HEALTH URL: $targetHealthUrl\n" +
+                        "HTTP response code: $code\n" +
+                        "HTTP response body: $body"
+                    )
+
+                    if (response.isSuccessful) {
+                        return@withContext true
+                    } else {
+                        Log.w(TAG, "Health check returned HTTP $code on attempt $attempt/$maxRetries")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(
+                    TAG,
+                    "[HEALTH CHECK EXCEPTION] (Attempt $attempt/$maxRetries)\n" +
+                    "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
+                    "HEALTH URL: $targetHealthUrl\n" +
+                    "Error: ${e.javaClass.simpleName}: ${e.message}"
+                )
+            }
         }
+
+        Log.e(TAG, "All $maxRetries health check attempts failed. Backend may still be spinning up.")
+        false
     }
 
     /**
@@ -179,16 +236,26 @@ class SmartApiBackendClient {
         closeWebSocket()
 
         try {
+            val targetWsUrl = backendConfig.wsUrl
+            Log.i(TAG, "[WS INITIATING]\nBACKEND URL: ${backendConfig.apiBaseUrl}\nWebSocket URL: $targetWsUrl\nWebSocket connection state: ${_connectionStatus.value.label}")
+
             val request = Request.Builder()
-                .url(backendConfig.wsUrl)
+                .url(targetWsUrl)
                 .build()
 
             webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    Log.d(TAG, "WebSocket Connected successfully to ${backendConfig.wsUrl}")
                     isWebSocketActive = true
-                    _connectionStatus.value = ConnectionStatus.CONNECTED
-                    stopSimulationFallback()
+                    _connectionStatus.value = ConnectionStatus.CONNECTED_WAITING_FOR_TICK
+                    Log.i(
+                        TAG,
+                        "[WS OPEN]\n" +
+                        "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
+                        "WebSocket URL: $targetWsUrl\n" +
+                        "WebSocket connection state: ${_connectionStatus.value.label}\n" +
+                        "HTTP response code: ${response.code}\n" +
+                        "HTTP response message: ${response.message}"
+                    )
 
                     // Send subscription payload for all monitored tokens
                     val tokensJson = JSONArray()
@@ -201,7 +268,10 @@ class SmartApiBackendClient {
                     }
 
                     webSocket.send(subPayload.toString())
-                    Log.d(TAG, "Sent subscription payload for ${_marketSymbols.value.size} tokens")
+                    Log.i(TAG, "Sent subscription payload for ${_marketSymbols.value.size} tokens")
+
+                    // Immediately synchronize real quotes via REST while waiting for live ticks
+                    syncInitialQuotes()
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -209,32 +279,38 @@ class SmartApiBackendClient {
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.w(TAG, "WebSocket Closing: $code - $reason")
+                    Log.w(TAG, "[WS CLOSING] code: $code - reason: $reason | WebSocket connection state: ${_connectionStatus.value.label}")
                     isWebSocketActive = false
                     _connectionStatus.value = ConnectionStatus.DISCONNECTED
                     scheduleAutomaticReconnect()
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.w(TAG, "WebSocket Closed: $code - $reason")
+                    Log.w(TAG, "[WS CLOSED] code: $code - reason: $reason | WebSocket connection state: ${_connectionStatus.value.label}")
                     isWebSocketActive = false
                     _connectionStatus.value = ConnectionStatus.DISCONNECTED
                     scheduleAutomaticReconnect()
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Log.e(TAG, "WebSocket Failure: ${t.message}. Response: ${response?.code}")
+                    Log.e(
+                        TAG,
+                        "[WS FAILURE]\n" +
+                        "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
+                        "WebSocket URL: $targetWsUrl\n" +
+                        "WebSocket connection state: ERROR\n" +
+                        "HTTP response code: ${response?.code ?: "N/A"}\n" +
+                        "Error: ${t.javaClass.simpleName}: ${t.message}"
+                    )
                     isWebSocketActive = false
-                    _connectionStatus.value = ConnectionStatus.DISCONNECTED
-                    startSimulationFallback()
+                    _connectionStatus.value = ConnectionStatus.ERROR
                     scheduleAutomaticReconnect()
                 }
             })
         } catch (e: Exception) {
-            Log.e(TAG, "WebSocket Connection Exception: ${e.message}")
+            Log.e(TAG, "[WS EXCEPTION] Failed to start WebSocket: ${e.message}")
             isWebSocketActive = false
-            _connectionStatus.value = ConnectionStatus.DISCONNECTED
-            startSimulationFallback()
+            _connectionStatus.value = ConnectionStatus.ERROR
             scheduleAutomaticReconnect()
         }
     }
@@ -257,7 +333,25 @@ class SmartApiBackendClient {
                     val volume = json.optLong("volume", 0L)
                     val timestamp = json.optLong("timestamp", System.currentTimeMillis())
 
-                    if (token.isNotEmpty() && ltp > 0) {
+                    if (token.isNotEmpty() && ltp > 0.0) {
+                        lastTickReceivedAt = System.currentTimeMillis()
+                        _connectionStatus.value = ConnectionStatus.LIVE
+
+                        val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(lastTickReceivedAt))
+                        Log.i(
+                            TAG,
+                            "[LIVE TICK RECEIVED]\n" +
+                            "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
+                            "WebSocket connection state: ${_connectionStatus.value.label}\n" +
+                            "Token: $token | Symbol: $symbol | Exchange: $exchange\n" +
+                            "LTP: $ltp | Change: $change ($changePercent%)\n" +
+                            "last tick received timestamp: $lastTickReceivedAt ($dateStr)\n" +
+                            "Angel One LTP: $angelOneLtp | Backend Forwarded LTP: $backendForwardedLtp"
+                        )
+                        Log.i(
+                            "LIVE DATA",
+                            "[LIVE DATA]\ntoken: $token\nsymbol: $symbol\nltp: $ltp\nexchangeTimestamp: $timestamp\nreceivedAt: $lastTickReceivedAt\nsource=ANGEL_ONE"
+                        )
                         Log.i(
                             "DATA_AUDIT",
                             "[DATA AUDIT: ANDROID RECEIVED] Symbol: $symbol | Exchange: $exchange | Token: $token | Timestamp: $timestamp | Angel One LTP: $angelOneLtp | Backend Forwarded LTP: $backendForwardedLtp | App Received LTP: $ltp"
@@ -307,11 +401,13 @@ class SmartApiBackendClient {
                     }
                 }
                 "connection" -> {
-                    Log.d(TAG, "Backend Handshake: ${json.optString("service")}")
-                    _connectionStatus.value = ConnectionStatus.CONNECTED
+                    Log.i(TAG, "[BACKEND HANDSHAKE] Service: ${json.optString("service")} | WebSocket connection state: ${_connectionStatus.value.label}")
+                    if (_connectionStatus.value != ConnectionStatus.LIVE) {
+                        _connectionStatus.value = ConnectionStatus.CONNECTED_WAITING_FOR_TICK
+                    }
                 }
                 "subscribed" -> {
-                    Log.d(TAG, "Backend Subscription Confirmed: ${json.optJSONArray("tokens")?.length()} tokens")
+                    Log.i(TAG, "[BACKEND SUBSCRIPTION CONFIRMED] Tokens count: ${json.optJSONArray("tokens")?.length()}")
                 }
             }
         } catch (e: Exception) {
@@ -333,10 +429,10 @@ class SmartApiBackendClient {
 
         if (index >= 0) {
             val stock = currentList[index]
-            val actualChange = if (change != 0.0) change else (ltp - stock.previousClose)
-            val actualChangePct = if (changePercent != 0.0) changePercent else ((actualChange / stock.previousClose) * 100.0)
-            val newHigh = kotlin.math.max(stock.high, ltp)
-            val newLow = kotlin.math.min(stock.low, ltp)
+            val actualChange = if (change != 0.0) change else if (stock.previousClose > 0.0) (ltp - stock.previousClose) else 0.0
+            val actualChangePct = if (changePercent != 0.0) changePercent else if (stock.previousClose > 0.0) ((actualChange / stock.previousClose) * 100.0) else 0.0
+            val newHigh = if (stock.high > 0.0) kotlin.math.max(stock.high, ltp) else ltp
+            val newLow = if (stock.low > 0.0) kotlin.math.min(stock.low, ltp) else ltp
 
             val updatedStock = stock.copy(
                 ltp = ltp,
@@ -372,7 +468,7 @@ class SmartApiBackendClient {
         if (reconnectJob?.isActive == true) return
 
         reconnectJob = scope.launch {
-            Log.d(TAG, "Scheduling automatic reconnection in 3 seconds...")
+            Log.i(TAG, "[SCHEDULING RECONNECT] Will attempt reconnection in 3 seconds... (BACKEND URL: ${backendConfig.apiBaseUrl})")
             delay(3000)
             if (!isWebSocketActive) {
                 _connectionStatus.value = ConnectionStatus.CONNECTING
@@ -392,92 +488,12 @@ class SmartApiBackendClient {
     }
 
     /**
-     * Simulation fallback disabled for production Live Market mode.
-     * When disconnected, the app marks status as DISCONNECTED and shows Live Data Unavailable.
-     */
-    private fun startSimulationFallback() {
-        // Disabled in LIVE mode to prevent displaying simulated/fake prices
-    }
-
-    private fun stopSimulationFallback() {
-        simulationFallbackJob?.cancel()
-        simulationFallbackJob = null
-    }
-
-    /**
      * Retrieves historical candle data for a symbol and timeframe.
+     * Returns real candles from live cache or empty list when no feed has been received.
      */
     fun getHistoricalCandles(symbol: String, timeframe: Timeframe, count: Int = 120): List<Candle> {
         val cacheKey = "${symbol}_${timeframe.name}"
-        candleCache[cacheKey]?.let { return it }
-
-        val stock = _marketSymbols.value.find { it.symbol == symbol }
-            ?: _marketSymbols.value.first()
-        val basePrice = stock.ltp
-        val generatedCandles = generateRealisticIntradayCandles(basePrice, timeframe, count)
-        candleCache[cacheKey] = generatedCandles.toMutableList()
-        return generatedCandles
-    }
-
-    /**
-     * Realistic Indian stock price path with key levels, resistance tests, and breakout structures
-     */
-    private fun generateRealisticIntradayCandles(
-        currentPrice: Double,
-        timeframe: Timeframe,
-        count: Int
-    ): List<Candle> {
-        val candles = mutableListOf<Candle>()
-        val intervalMs = timeframe.seconds * 1000L
-        val now = System.currentTimeMillis()
-        var price = currentPrice * (1.0 - (Random.nextDouble(0.005, 0.015)))
-
-        val resistanceLevel = price * 1.012
-
-        for (i in count downTo 1) {
-            val candleTime = now - (i * intervalMs)
-            val open = price
-
-            val drift = if (price >= resistanceLevel * 0.998) {
-                Random.nextDouble(-0.003, 0.0005) // strong rejection bias at resistance
-            } else if (i in (count - 15)..(count - 5)) {
-                Random.nextDouble(-0.001, 0.003) // morning rally towards resistance
-            } else {
-                Random.nextDouble(-0.0015, 0.0018)
-            }
-
-            val rawClose = open * (1.0 + drift)
-            val high = kotlin.math.max(open, rawClose) + (open * Random.nextDouble(0.0005, 0.0025))
-            val low = kotlin.math.min(open, rawClose) - (open * Random.nextDouble(0.0005, 0.002))
-            val close = rawClose.coerceIn(low, high)
-            val vol = Random.nextLong(5000, 95000)
-
-            candles.add(
-                Candle(
-                    timestamp = candleTime,
-                    open = kotlin.math.round(open * 100.0) / 100.0,
-                    high = kotlin.math.round(high * 100.0) / 100.0,
-                    low = kotlin.math.round(low * 100.0) / 100.0,
-                    close = kotlin.math.round(close * 100.0) / 100.0,
-                    volume = vol,
-                    isComplete = true
-                )
-            )
-            price = close
-        }
-
-        if (candles.isNotEmpty()) {
-            val last = candles.last()
-            val adjustedLast = last.copy(
-                close = currentPrice,
-                high = kotlin.math.max(last.high, currentPrice),
-                low = kotlin.math.min(last.low, currentPrice),
-                isComplete = false
-            )
-            candles[candles.size - 1] = adjustedLast
-        }
-
-        return candles
+        return candleCache[cacheKey] ?: emptyList()
     }
 
     fun updateLastCandle(symbol: String, timeframe: Timeframe, updatedCandle: Candle) {
@@ -499,6 +515,251 @@ class SmartApiBackendClient {
     }
 
     /**
+     * Synchronizes real quotes from the Angel One SmartAPI backend for all tracked symbols.
+     * This is called on connection establishment so users see verified prices (LAST AVAILABLE / PREVIOUS CLOSE)
+     * immediately while WebSocket waits for incoming market ticks.
+     */
+    fun syncInitialQuotes() {
+        quoteSyncJob?.cancel()
+        quoteSyncJob = scope.launch {
+            Log.i(TAG, "[SYNC INITIAL QUOTES] Fetching real REST quotes from SmartAPI for tracked symbols...")
+            val symbolsSnapshot = _marketSymbols.value
+            for (stock in symbolsSnapshot) {
+                try {
+                    fetchQuote(stock.token, stock.exchange)
+                    delay(120) // spacing out calls
+                } catch (e: Exception) {
+                    Log.w(TAG, "[SYNC QUOTE ERROR] Token ${stock.token} (${stock.symbol}): ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Calls GET /api/quote?symboltoken=TOKEN&exchange=EXCHANGE
+     * Fetches real LTP and Previous Close directly from Angel One SmartAPI via backend.
+     * Never simulates or invents prices.
+     */
+    suspend fun fetchQuote(symbolToken: String, exchange: String = "NSE"): StockSymbol? = withContext(Dispatchers.IO) {
+        val sanitizedToken = symbolToken.trim()
+        if (sanitizedToken.isEmpty()) return@withContext null
+
+        val targetUrl = "${backendConfig.apiBaseUrl}/quote?symboltoken=$sanitizedToken&exchange=$exchange"
+        val maxRetries = 2
+        val backoffDelays = listOf(0L, 1000L)
+
+        for (attempt in 1..maxRetries) {
+            if (backoffDelays[attempt - 1] > 0L) {
+                delay(backoffDelays[attempt - 1])
+            }
+
+            try {
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .get()
+                    .build()
+
+                okHttpClient.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val bodyStr = response.body?.string() ?: ""
+
+                    Log.i(
+                        TAG,
+                        "[FETCH QUOTE RESPONSE]\n" +
+                        "Token: $sanitizedToken | Exchange: $exchange\n" +
+                        "HTTP response code: $code\n" +
+                        "HTTP response body: $bodyStr"
+                    )
+
+                    if (response.isSuccessful && bodyStr.isNotBlank()) {
+                        val json = JSONObject(bodyStr)
+                        if (json.optBoolean("status", false)) {
+                            val dataObj = json.optJSONObject("data")
+                            var token = sanitizedToken
+                            var symbol = ""
+                            var name = ""
+                            var ltp = 0.0
+                            var prevClose = 0.0
+                            var open = 0.0
+                            var high = 0.0
+                            var low = 0.0
+                            var change = 0.0
+                            var changePercent = 0.0
+                            var volume = 0L
+
+                            if (dataObj != null) {
+                                val fetchedArr = dataObj.optJSONArray("fetched")
+                                if (fetchedArr != null && fetchedArr.length() > 0) {
+                                    val item = fetchedArr.getJSONObject(0)
+                                    token = item.optString("symbolToken", sanitizedToken)
+                                    symbol = item.optString("tradingSymbol", "")
+                                    ltp = item.optDouble("ltp", 0.0)
+                                    prevClose = item.optDouble("close", 0.0)
+                                    open = item.optDouble("open", 0.0)
+                                    high = item.optDouble("high", 0.0)
+                                    low = item.optDouble("low", 0.0)
+                                    change = item.optDouble("netChange", if (prevClose > 0.0 && ltp > 0.0) ltp - prevClose else 0.0)
+                                    changePercent = item.optDouble("percentChange", if (prevClose > 0.0 && change != 0.0) (change / prevClose) * 100.0 else 0.0)
+                                    volume = item.optLong("tradeVolume", 0L)
+                                } else {
+                                    token = dataObj.optString("token", dataObj.optString("symbolToken", sanitizedToken))
+                                    symbol = dataObj.optString("symbol", dataObj.optString("tradingSymbol", ""))
+                                    name = dataObj.optString("name", "")
+                                    ltp = dataObj.optDouble("ltp", 0.0)
+                                    prevClose = dataObj.optDouble("previousClose", dataObj.optDouble("prevClose", dataObj.optDouble("close", 0.0)))
+                                    open = dataObj.optDouble("open", 0.0)
+                                    high = dataObj.optDouble("high", 0.0)
+                                    low = dataObj.optDouble("low", 0.0)
+                                    change = dataObj.optDouble("change", dataObj.optDouble("netChange", if (prevClose > 0.0 && ltp > 0.0) ltp - prevClose else 0.0))
+                                    changePercent = dataObj.optDouble("changePercent", dataObj.optDouble("percentChange", if (prevClose > 0.0 && change != 0.0) (change / prevClose) * 100.0 else 0.0))
+                                    volume = dataObj.optLong("volume", dataObj.optLong("tradeVolume", 0L))
+                                }
+                            }
+
+                            if (ltp > 0.0 || prevClose > 0.0) {
+                                val currentList = _marketSymbols.value.toMutableList()
+                                val stockIdx = currentList.indexOfFirst {
+                                    it.token == token ||
+                                    (symbol.isNotEmpty() && it.symbol.equals(symbol.removeSuffix("-EQ"), ignoreCase = true))
+                                }
+
+                                val finalSymbol = if (stockIdx >= 0) currentList[stockIdx].symbol else (if (symbol.isNotEmpty()) symbol.removeSuffix("-EQ") else "TOKEN_$token")
+                                val finalName = if (stockIdx >= 0) currentList[stockIdx].companyName else (if (name.isNotEmpty()) name else finalSymbol)
+
+                                val calculatedChange = if (change != 0.0) change else if (prevClose > 0.0 && ltp > 0.0) (ltp - prevClose) else 0.0
+                                val calculatedPct = if (changePercent != 0.0) changePercent else if (prevClose > 0.0 && calculatedChange != 0.0) ((calculatedChange / prevClose) * 100.0) else 0.0
+
+                                val stock = StockSymbol(
+                                    symbol = finalSymbol,
+                                    name = finalName,
+                                    token = token,
+                                    exchange = exchange,
+                                    ltp = ltp,
+                                    change = kotlin.math.round(calculatedChange * 100.0) / 100.0,
+                                    changePercent = kotlin.math.round(calculatedPct * 100.0) / 100.0,
+                                    open = if (open > 0.0) open else (if (prevClose > 0.0) prevClose else ltp),
+                                    high = if (high > 0.0) high else ltp,
+                                    low = if (low > 0.0) low else ltp,
+                                    close = if (ltp > 0.0) ltp else prevClose,
+                                    volume = volume,
+                                    previousClose = if (prevClose > 0.0) prevClose else ltp,
+                                    lastUpdated = System.currentTimeMillis()
+                                )
+
+                                if (stockIdx >= 0) {
+                                    currentList[stockIdx] = stock
+                                } else {
+                                    currentList.add(stock)
+                                }
+                                _marketSymbols.value = currentList
+
+                                // Standardized Diagnostic Logs
+                                Log.i("ANGELONE_RAW_TICK", "[ANGELONE_RAW_TICK] Token: $token | Symbol: $finalSymbol | Raw Angel LTP: $ltp | PrevClose: $prevClose | Source=SmartAPI REST Quote")
+                                Log.i("BACKEND_FORWARD", "[BACKEND_FORWARD] Token: $token | Symbol: $finalSymbol | LTP: $ltp | PrevClose: $prevClose")
+                                Log.i("ANDROID_RECEIVED", "[ANDROID_RECEIVED] Status: ${_connectionStatus.value.label} | Symbol: $finalSymbol | LTP: $ltp | PrevClose: $prevClose | Source=REST_QUOTE")
+                                Log.i("LIVE DATA", "[LIVE DATA] token: $token | symbol: $finalSymbol | ltp: $ltp | status: ${_connectionStatus.value.label} | source=REST_QUOTE_SYNC")
+
+                                return@withContext stock
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "[FETCH QUOTE EXCEPTION] Attempt $attempt/$maxRetries failed for $sanitizedToken: ${e.message}")
+            }
+        }
+
+        return@withContext null
+    }
+
+    /**
+     * Fetches candlestick data from GET /api/candles
+     * Supports both sub-second intervals (1s, 5s, 15s, 30s) and standard intervals (ONE_MINUTE, FIVE_MINUTE, etc.)
+     */
+    suspend fun fetchCandles(
+        symbolToken: String,
+        exchange: String = "NSE",
+        timeframe: Timeframe = Timeframe.MIN_1,
+        count: Int = 120
+    ): List<Candle> = withContext(Dispatchers.IO) {
+        val sanitizedToken = symbolToken.trim()
+        if (sanitizedToken.isEmpty()) return@withContext emptyList()
+
+        val intervalStr = when (timeframe) {
+            Timeframe.SEC_1 -> "1s"
+            Timeframe.SEC_5 -> "5s"
+            Timeframe.SEC_15 -> "15s"
+            Timeframe.SEC_30 -> "30s"
+            Timeframe.MIN_1 -> "ONE_MINUTE"
+            Timeframe.MIN_3 -> "THREE_MINUTE"
+            Timeframe.MIN_5 -> "FIVE_MINUTE"
+            Timeframe.MIN_15 -> "FIFTEEN_MINUTE"
+            Timeframe.MIN_30 -> "THIRTY_MINUTE"
+            Timeframe.HOUR_1 -> "ONE_HOUR"
+            Timeframe.DAY_1 -> "ONE_DAY"
+        }
+
+        val targetUrl = "${backendConfig.apiBaseUrl}/candles?symboltoken=$sanitizedToken&exchange=$exchange&interval=$intervalStr&count=$count"
+        val maxRetries = 2
+        val backoffDelays = listOf(0L, 1000L)
+
+        for (attempt in 1..maxRetries) {
+            if (backoffDelays[attempt - 1] > 0L) {
+                delay(backoffDelays[attempt - 1])
+            }
+
+            try {
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .get()
+                    .build()
+
+                okHttpClient.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val bodyStr = response.body?.string() ?: ""
+
+                    if (response.isSuccessful && bodyStr.isNotBlank()) {
+                        val json = JSONObject(bodyStr)
+                        if (json.optBoolean("status", false)) {
+                            val dataArr = json.optJSONArray("data") ?: JSONArray()
+                            val candleList = mutableListOf<Candle>()
+
+                            for (i in 0 until dataArr.length()) {
+                                val item = dataArr.optJSONObject(i) ?: continue
+                                candleList.add(
+                                    Candle(
+                                        timestamp = item.optLong("timestamp", System.currentTimeMillis()),
+                                        open = item.optDouble("open", 0.0),
+                                        high = item.optDouble("high", 0.0),
+                                        low = item.optDouble("low", 0.0),
+                                        close = item.optDouble("close", 0.0),
+                                        volume = item.optLong("volume", 0L),
+                                        isComplete = item.optBoolean("isComplete", true)
+                                    )
+                                )
+                            }
+
+                            if (candleList.isNotEmpty()) {
+                                val stock = _marketSymbols.value.find { it.token == sanitizedToken }
+                                val symbolKey = stock?.symbol ?: sanitizedToken
+                                val cacheKey = "${symbolKey}_${timeframe.name}"
+                                candleCache[cacheKey] = candleList.toMutableList()
+
+                                Log.i("CHART_DATA", "[CHART_DATA] Loaded ${candleList.size} candles for $symbolKey ($sanitizedToken) at $timeframe from backend endpoint")
+                                return@withContext candleList
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "[FETCH CANDLES EXCEPTION] Attempt $attempt/$maxRetries for token $sanitizedToken: ${e.message}")
+            }
+        }
+
+        return@withContext emptyList()
+    }
+
+    /**
      * Searches Angel One Scrip Master database via backend GET /api/search?q=query
      */
     suspend fun searchStocks(query: String): List<StockSearchResult> = withContext(Dispatchers.IO) {
@@ -515,51 +776,63 @@ class SmartApiBackendClient {
             }
         }
 
-        try {
-            val base = if (backendConfig.serverUrl.endsWith("/api")) {
-                backendConfig.serverUrl
-            } else {
-                "${backendConfig.serverUrl}/api"
+        val encodedQuery = java.net.URLEncoder.encode(trimmedQuery, "UTF-8")
+        val targetUrl = "${backendConfig.apiBaseUrl}/search?q=$encodedQuery&limit=50"
+        val maxRetries = 2
+        val backoffDelays = listOf(0L, 1500L)
+
+        for (attempt in 1..maxRetries) {
+            if (backoffDelays[attempt - 1] > 0L) {
+                delay(backoffDelays[attempt - 1])
             }
-            val encodedQuery = java.net.URLEncoder.encode(trimmedQuery, "UTF-8")
-            val url = "$base/search?q=$encodedQuery&limit=50"
 
-            val request = Request.Builder()
-                .url(url)
-                .get()
-                .build()
+            try {
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .get()
+                    .build()
 
-            val response = okHttpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val bodyStr = response.body?.string()
-                if (!bodyStr.isNullOrBlank()) {
-                    val json = JSONObject(bodyStr)
-                    val resultsArray = json.optJSONArray("results") ?: json.optJSONArray("data") ?: JSONArray()
+                okHttpClient.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val bodyStr = response.body?.string() ?: ""
 
-                    val results = mutableListOf<StockSearchResult>()
-                    for (i in 0 until resultsArray.length()) {
-                        val item = resultsArray.optJSONObject(i) ?: continue
-                        results.add(
-                            StockSearchResult(
-                                name = item.optString("name", item.optString("symbol", "")),
-                                symbol = item.optString("symbol", ""),
-                                token = item.optString("token", ""),
-                                exchange = item.optString("exchange", "NSE"),
-                                instrumentType = item.optString("instrumentType", item.optString("instrumenttype", "EQ"))
+                    Log.i(
+                        TAG,
+                        "[SEARCH STOCKS RESPONSE]\n" +
+                        "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
+                        "Query: $trimmedQuery | HTTP response code: $code\n" +
+                        "HTTP response body length: ${bodyStr.length} chars"
+                    )
+
+                    if (response.isSuccessful && bodyStr.isNotBlank()) {
+                        val json = JSONObject(bodyStr)
+                        val resultsArray = json.optJSONArray("results") ?: json.optJSONArray("data") ?: JSONArray()
+
+                        val results = mutableListOf<StockSearchResult>()
+                        for (i in 0 until resultsArray.length()) {
+                            val item = resultsArray.optJSONObject(i) ?: continue
+                            results.add(
+                                StockSearchResult(
+                                    name = item.optString("name", item.optString("symbol", "")),
+                                    symbol = item.optString("symbol", ""),
+                                    token = item.optString("token", ""),
+                                    exchange = item.optString("exchange", "NSE"),
+                                    instrumentType = item.optString("instrumentType", item.optString("instrumenttype", "EQ"))
+                                )
                             )
-                        )
-                    }
+                        }
 
-                    if (results.isNotEmpty()) {
-                        return@withContext results
+                        if (results.isNotEmpty()) {
+                            return@withContext results
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "[SEARCH STOCKS EXCEPTION] Attempt $attempt/$maxRetries failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Backend search failed (${e.message}), falling back to local list")
         }
 
-        // Fallback to local filtering
+        // Fallback to local master list
         return@withContext _marketSymbols.value
             .filter {
                 it.symbol.contains(trimmedQuery, ignoreCase = true) ||
@@ -579,62 +852,76 @@ class SmartApiBackendClient {
 
     /**
      * Fetches all 23 supported NSE indices from backend GET /api/indices
-     * with graceful fallback to built-in IndicesDataProvider.
+     * with retry for Render cold-starts and clean fallback metadata (0.0 prices, no simulated data).
      */
     suspend fun fetchIndices(): List<IndexItem> = withContext(Dispatchers.IO) {
-        try {
-            val base = if (backendConfig.serverUrl.endsWith("/api")) {
-                backendConfig.serverUrl
-            } else {
-                "${backendConfig.serverUrl}/api"
+        val targetUrl = "${backendConfig.apiBaseUrl}/indices"
+        val maxRetries = 3
+        val backoffDelays = listOf(0L, 2000L, 4000L)
+
+        for (attempt in 1..maxRetries) {
+            if (backoffDelays[attempt - 1] > 0L) {
+                delay(backoffDelays[attempt - 1])
             }
-            val url = "$base/indices"
 
-            val request = Request.Builder()
-                .url(url)
-                .get()
-                .build()
+            try {
+                Log.i(TAG, "[FETCH INDICES ATTEMPT $attempt/$maxRetries]\nBACKEND URL: ${backendConfig.apiBaseUrl}\nRequest URL: $targetUrl")
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .get()
+                    .build()
 
-            val response = okHttpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val bodyStr = response.body?.string()
-                if (!bodyStr.isNullOrBlank()) {
-                    val json = JSONObject(bodyStr)
-                    val array = json.optJSONArray("indices") ?: json.optJSONArray("data") ?: JSONArray()
-                    val list = mutableListOf<IndexItem>()
+                okHttpClient.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val bodyStr = response.body?.string() ?: ""
 
-                    for (i in 0 until array.length()) {
-                        val item = array.optJSONObject(i) ?: continue
-                        list.add(
-                            IndexItem(
-                                id = item.optString("id", item.optString("symbol", "").lowercase().replace(" ", "-")),
-                                symbol = item.optString("symbol", ""),
-                                alias = if (item.has("alias") && !item.isNull("alias")) item.optString("alias") else null,
-                                name = item.optString("name", item.optString("symbol", "")),
-                                token = item.optString("token", ""),
-                                exchange = item.optString("exchange", "NSE"),
-                                category = item.optString("category", "Broad Market"),
-                                ltp = item.optDouble("ltp", 0.0),
-                                change = item.optDouble("change", 0.0),
-                                changePercent = item.optDouble("changePercent", 0.0),
-                                high = item.optDouble("high", item.optDouble("ltp", 0.0)),
-                                low = item.optDouble("low", item.optDouble("ltp", 0.0)),
-                                prevClose = item.optDouble("prevClose", item.optDouble("ltp", 0.0)),
-                                constituentCount = item.optInt("constituentCount", 0),
-                                description = item.optString("description", "")
+                    Log.i(
+                        TAG,
+                        "[FETCH INDICES RESPONSE]\n" +
+                        "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
+                        "HTTP response code: $code\n" +
+                        "HTTP response body length: ${bodyStr.length} chars"
+                    )
+
+                    if (response.isSuccessful && bodyStr.isNotBlank()) {
+                        val json = JSONObject(bodyStr)
+                        val array = json.optJSONArray("indices") ?: json.optJSONArray("data") ?: JSONArray()
+                        val list = mutableListOf<IndexItem>()
+
+                        for (i in 0 until array.length()) {
+                            val item = array.optJSONObject(i) ?: continue
+                            list.add(
+                                IndexItem(
+                                    id = item.optString("id", item.optString("symbol", "").lowercase().replace(" ", "-")),
+                                    symbol = item.optString("symbol", ""),
+                                    alias = if (item.has("alias") && !item.isNull("alias")) item.optString("alias") else null,
+                                    name = item.optString("name", item.optString("symbol", "")),
+                                    token = item.optString("token", ""),
+                                    exchange = item.optString("exchange", "NSE"),
+                                    category = item.optString("category", "Broad Market"),
+                                    ltp = item.optDouble("ltp", 0.0),
+                                    change = item.optDouble("change", 0.0),
+                                    changePercent = item.optDouble("changePercent", 0.0),
+                                    high = item.optDouble("high", item.optDouble("ltp", 0.0)),
+                                    low = item.optDouble("low", item.optDouble("ltp", 0.0)),
+                                    prevClose = item.optDouble("prevClose", item.optDouble("ltp", 0.0)),
+                                    constituentCount = item.optInt("constituentCount", 0),
+                                    description = item.optString("description", "")
+                                )
                             )
-                        )
-                    }
+                        }
 
-                    if (list.isNotEmpty()) {
-                        return@withContext list
+                        if (list.isNotEmpty()) {
+                            return@withContext list
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "[FETCH INDICES EXCEPTION] Attempt $attempt/$maxRetries failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to fetch indices from backend (${e.message}), using default indices dataset")
         }
 
+        Log.w(TAG, "Backend /indices unreachable or timeout. Using base index definitions awaiting live feed.")
         return@withContext IndicesDataProvider.DEFAULT_INDICES
     }
 
@@ -645,56 +932,68 @@ class SmartApiBackendClient {
         val sanitized = indexIdOrSymbol.trim()
         if (sanitized.isEmpty()) return@withContext emptyList()
 
-        try {
-            val base = if (backendConfig.serverUrl.endsWith("/api")) {
-                backendConfig.serverUrl
-            } else {
-                "${backendConfig.serverUrl}/api"
+        val encodedName = java.net.URLEncoder.encode(sanitized, "UTF-8")
+        val targetUrl = "${backendConfig.apiBaseUrl}/indices/$encodedName/constituents"
+        val maxRetries = 3
+        val backoffDelays = listOf(0L, 2000L, 4000L)
+
+        for (attempt in 1..maxRetries) {
+            if (backoffDelays[attempt - 1] > 0L) {
+                delay(backoffDelays[attempt - 1])
             }
-            val encodedName = java.net.URLEncoder.encode(sanitized, "UTF-8")
-            val url = "$base/indices/$encodedName/constituents"
 
-            val request = Request.Builder()
-                .url(url)
-                .get()
-                .build()
+            try {
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .get()
+                    .build()
 
-            val response = okHttpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val bodyStr = response.body?.string()
-                if (!bodyStr.isNullOrBlank()) {
-                    val json = JSONObject(bodyStr)
-                    val array = json.optJSONArray("constituents") ?: json.optJSONArray("data") ?: JSONArray()
-                    val list = mutableListOf<StockSymbol>()
+                okHttpClient.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val bodyStr = response.body?.string() ?: ""
 
-                    for (i in 0 until array.length()) {
-                        val item = array.optJSONObject(i) ?: continue
-                        list.add(
-                            StockSymbol(
-                                symbol = item.optString("symbol", ""),
-                                name = item.optString("name", item.optString("symbol", "")),
-                                token = item.optString("token", ""),
-                                exchange = item.optString("exchange", "NSE"),
-                                ltp = item.optDouble("ltp", 0.0),
-                                change = item.optDouble("change", 0.0),
-                                changePercent = item.optDouble("changePercent", 0.0),
-                                open = item.optDouble("open", item.optDouble("ltp", 0.0)),
-                                high = item.optDouble("high", item.optDouble("ltp", 0.0)),
-                                low = item.optDouble("low", item.optDouble("ltp", 0.0)),
-                                close = item.optDouble("ltp", 0.0),
-                                volume = item.optLong("volume", 1000000L),
-                                previousClose = item.optDouble("previousClose", item.optDouble("ltp", 0.0))
+                    Log.i(
+                        TAG,
+                        "[FETCH CONSTITUENTS RESPONSE]\n" +
+                        "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
+                        "Index: $sanitized | HTTP response code: $code\n" +
+                        "HTTP response body length: ${bodyStr.length} chars"
+                    )
+
+                    if (response.isSuccessful && bodyStr.isNotBlank()) {
+                        val json = JSONObject(bodyStr)
+                        val array = json.optJSONArray("constituents") ?: json.optJSONArray("data") ?: JSONArray()
+                        val list = mutableListOf<StockSymbol>()
+
+                        for (i in 0 until array.length()) {
+                            val item = array.optJSONObject(i) ?: continue
+                            list.add(
+                                StockSymbol(
+                                    symbol = item.optString("symbol", ""),
+                                    name = item.optString("name", item.optString("symbol", "")),
+                                    token = item.optString("token", ""),
+                                    exchange = item.optString("exchange", "NSE"),
+                                    ltp = item.optDouble("ltp", 0.0),
+                                    change = item.optDouble("change", 0.0),
+                                    changePercent = item.optDouble("changePercent", 0.0),
+                                    open = item.optDouble("open", item.optDouble("ltp", 0.0)),
+                                    high = item.optDouble("high", item.optDouble("ltp", 0.0)),
+                                    low = item.optDouble("low", item.optDouble("ltp", 0.0)),
+                                    close = item.optDouble("ltp", 0.0),
+                                    volume = item.optLong("volume", 0L),
+                                    previousClose = item.optDouble("previousClose", item.optDouble("ltp", 0.0))
+                                )
                             )
-                        )
-                    }
+                        }
 
-                    if (list.isNotEmpty()) {
-                        return@withContext list
+                        if (list.isNotEmpty()) {
+                            return@withContext list
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "[FETCH CONSTITUENTS EXCEPTION] Attempt $attempt/$maxRetries for $indexIdOrSymbol failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to fetch constituents for $indexIdOrSymbol (${e.message}), using fallback dataset")
         }
 
         return@withContext IndicesDataProvider.getConstituentsForIndex(sanitized)

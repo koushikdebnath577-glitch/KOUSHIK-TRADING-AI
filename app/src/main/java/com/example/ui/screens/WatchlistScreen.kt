@@ -28,8 +28,10 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.AlertEntity
 import com.example.data.local.SavedPlanEntity
 import com.example.data.local.WatchlistEntity
+import com.example.data.model.ConnectionStatus
 import com.example.data.model.StockSearchResult
 import com.example.data.model.StockSymbol
+import com.example.ui.components.formatMarketTimestamp
 import com.example.ui.theme.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -41,6 +43,7 @@ import java.util.*
 fun WatchlistScreen(
     watchlist: List<WatchlistEntity>,
     marketSymbols: List<StockSymbol>,
+    connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTING,
     savedPlans: List<SavedPlanEntity>,
     alerts: List<AlertEntity>,
     onSelectStock: (String) -> Unit,
@@ -134,6 +137,7 @@ fun WatchlistScreen(
             0 -> WatchlistContent(
                 watchlist = watchlist,
                 marketSymbols = marketSymbols,
+                connectionStatus = connectionStatus,
                 onSelectStock = onSelectStock,
                 onRemove = onRemoveFromWatchlist,
                 onOpenSearch = { showSearchDialog = true }
@@ -207,10 +211,12 @@ private fun RowScope.TabButton(
 private fun WatchlistContent(
     watchlist: List<WatchlistEntity>,
     marketSymbols: List<StockSymbol>,
+    connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTING,
     onSelectStock: (String) -> Unit,
     onRemove: (String) -> Unit,
     onOpenSearch: () -> Unit
 ) {
+    val isLive = connectionStatus == ConnectionStatus.LIVE
     if (watchlist.isEmpty()) {
         Column(
             modifier = Modifier
@@ -288,9 +294,22 @@ private fun WatchlistContent(
         items(watchlist, key = { it.symbol }) { item ->
             val liveStock = marketSymbols.find { it.symbol == item.symbol }
             val ltp = liveStock?.ltp ?: 0.0
+            val prevClose = liveStock?.previousClose ?: 0.0
             val change = liveStock?.change ?: 0.0
             val changePercent = liveStock?.changePercent ?: 0.0
             val isPos = change >= 0
+            val displayPrice = when {
+                ltp > 0.0 -> ltp
+                prevClose > 0.0 -> prevClose
+                else -> 0.0
+            }
+            val priceLabel = when {
+                isLive && ltp > 0.0 -> "LIVE"
+                ltp > 0.0 -> "LAST AVAILABLE"
+                prevClose > 0.0 -> "PREV CLOSE"
+                else -> "UNAVAILABLE"
+            }
+            val formattedTime = liveStock?.let { formatMarketTimestamp(it.lastUpdated) } ?: ""
 
             Card(
                 onClick = { onSelectStock(item.symbol) },
@@ -320,19 +339,52 @@ private fun WatchlistContent(
 
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "₹${String.format(Locale.US, "%.2f", ltp)}",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "${if (isPos) "+" else ""}${String.format(Locale.US, "%.2f", change)} (${if (isPos) "+" else ""}${String.format(Locale.US, "%.2f", changePercent)}%)",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (isPos) BullishGreen else BearishRed
-                            )
+                            if (displayPrice > 0.0) {
+                                Text(
+                                    text = "₹${String.format(Locale.US, "%,.2f", displayPrice)}",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary
+                                )
+                                if (isLive) {
+                                    Text(
+                                        text = "${if (isPos) "+" else ""}${String.format(Locale.US, "%.2f", change)} (${if (isPos) "+" else ""}${String.format(Locale.US, "%.2f", changePercent)}%)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isPos) BullishGreen else BearishRed
+                                    )
+                                } else {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(
+                                            text = "$priceLabel • NOT LIVE",
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = KeyLevelYellow
+                                        )
+                                        if (formattedTime.isNotEmpty()) {
+                                            Text(
+                                                text = "• $formattedTime",
+                                                fontSize = 8.sp,
+                                                color = TextTertiary
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "Price unavailable",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextTertiary
+                                )
+                                Text(
+                                    text = "LIVE DATA UNAVAILABLE",
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = KeyLevelYellow
+                                )
+                            }
                         }
 
                         IconButton(

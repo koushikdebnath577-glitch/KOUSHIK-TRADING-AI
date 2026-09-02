@@ -37,7 +37,7 @@ fun SettingsScreen(
     var riskErrorText by remember { mutableStateOf<String?>(null) }
     var riskSaveSuccessMessage by remember { mutableStateOf<String?>(null) }
     var selectedRR by remember(defaultTargetRR) { mutableStateOf(defaultTargetRR) }
-    var isSimulatedMode by remember { mutableStateOf(true) }
+    var isSimulatedMode by remember { mutableStateOf(false) }
 
     val presetAmounts = listOf(500.0, 1000.0, 1500.0, 2500.0, 5000.0)
 

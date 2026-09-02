@@ -46,9 +46,11 @@ fun AnalyzeScreen(
     onReconnect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val currentLtp = stock?.ltp ?: (candles.lastOrNull()?.close ?: 0.0)
+    val currentLtp = stock?.ltp ?: 0.0
+    val prevClose = stock?.previousClose ?: 0.0
     val change = stock?.change ?: 0.0
     val changePercent = stock?.changePercent ?: 0.0
+    val lastUpdated = stock?.lastUpdated ?: 0L
 
     LazyColumn(
         modifier = modifier
@@ -65,6 +67,8 @@ fun AnalyzeScreen(
                 ltp = currentLtp,
                 change = change,
                 changePercent = changePercent,
+                previousClose = prevClose,
+                lastUpdatedTimestamp = lastUpdated,
                 onReconnectClick = onReconnect
             )
         }

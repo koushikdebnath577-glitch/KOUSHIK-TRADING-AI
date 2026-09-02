@@ -23,6 +23,19 @@ import com.example.data.model.ConnectionStatus
 import com.example.data.model.KeyLevel
 import com.example.data.model.LevelStrength
 import com.example.ui.theme.*
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+fun formatMarketTimestamp(timestamp: Long): String {
+    if (timestamp <= 0L) return ""
+    return try {
+        val sdf = SimpleDateFormat("HH:mm:ss", Locale.US)
+        sdf.format(Date(timestamp))
+    } catch (e: Exception) {
+        ""
+    }
+}
 
 @Composable
 fun DisclaimerBanner(
@@ -66,15 +79,35 @@ fun ConnectionStatusHeader(
     ltp: Double,
     change: Double,
     changePercent: Double,
+    previousClose: Double = 0.0,
+    lastUpdatedTimestamp: Long = 0L,
     onReconnectClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isLive = status == ConnectionStatus.LIVE
     val isPositive = change >= 0
     val statusColor = when (status) {
-        ConnectionStatus.CONNECTED -> BullishGreen
+        ConnectionStatus.LIVE -> BullishGreen
+        ConnectionStatus.CONNECTED_WAITING_FOR_TICK -> CyanAccent
         ConnectionStatus.CONNECTING -> KeyLevelYellow
         ConnectionStatus.DISCONNECTED -> BearishRed
+        ConnectionStatus.ERROR -> BearishRed
     }
+
+    val displayPrice = when {
+        ltp > 0.0 -> ltp
+        previousClose > 0.0 -> previousClose
+        else -> 0.0
+    }
+
+    val priceLabel = when {
+        isLive && ltp > 0.0 -> "LIVE"
+        ltp > 0.0 -> "LAST AVAILABLE PRICE"
+        previousClose > 0.0 -> "PREVIOUS CLOSE"
+        else -> "PRICE UNAVAILABLE"
+    }
+
+    val formattedTime = formatMarketTimestamp(lastUpdatedTimestamp)
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -89,7 +122,7 @@ fun ConnectionStatusHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left: App name + Stock symbol + Live Pill
+            // Left: App name + Stock symbol + Connection Status Pill
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = "KOUSHIK TRADING AI",
@@ -111,32 +144,93 @@ fun ConnectionStatusHeader(
                         color = statusColor.copy(alpha = 0.12f),
                         border = androidx.compose.foundation.BorderStroke(1.dp, statusColor.copy(alpha = 0.3f))
                     ) {
-                        Text(
-                            text = status.label,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = statusColor,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(statusColor)
+                            )
+                            Text(
+                                text = status.label,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = statusColor
+                            )
+                        }
                     }
                 }
             }
 
             // Right: Price & Change in monospace
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text(
-                    text = "₹${String.format(java.util.Locale.US, "%.2f", ltp)}",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = if (isPositive) BullishGreen else BearishRed
-                )
-                Text(
-                    text = "${if (isPositive) "+" else ""}${String.format(java.util.Locale.US, "%.2f", change)} (${if (isPositive) "+" else ""}${String.format(java.util.Locale.US, "%.2f", changePercent)}%)",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (isPositive) BullishGreen else BearishRed
-                )
+                if (displayPrice > 0.0) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (!isLive) {
+                            Surface(
+                                shape = RoundedCornerShape(3.dp),
+                                color = KeyLevelYellowBg
+                            ) {
+                                Text(
+                                    text = priceLabel,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = KeyLevelYellow,
+                                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "₹${String.format(Locale.US, "%,.2f", displayPrice)}",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (isLive) (if (isPositive) BullishGreen else BearishRed) else TextPrimary
+                        )
+                    }
+
+                    if (isLive) {
+                        Text(
+                            text = "${if (isPositive) "+" else ""}${String.format(Locale.US, "%.2f", change)} (${if (isPositive) "+" else ""}${String.format(Locale.US, "%.2f", changePercent)}%)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isPositive) BullishGreen else BearishRed
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "NOT LIVE",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextTertiary
+                            )
+                            if (formattedTime.isNotEmpty()) {
+                                Text(
+                                    text = "• $formattedTime",
+                                    fontSize = 9.sp,
+                                    color = TextTertiary
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "Price unavailable",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextTertiary
+                    )
+                    Text(
+                        text = "LIVE DATA UNAVAILABLE",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = KeyLevelYellow
+                    )
+                }
             }
         }
     }

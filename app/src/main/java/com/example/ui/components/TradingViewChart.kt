@@ -40,6 +40,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.AnalysisResult
 import com.example.data.model.Candle
+import com.example.data.model.ConnectionStatus
 import com.example.data.model.KeyLevel
 import com.example.data.model.Timeframe
 import com.example.data.repository.TradingRepository
@@ -105,6 +106,8 @@ fun TradingViewChart(
     selectedTimeframe: Timeframe,
     onTimeframeSelected: (Timeframe) -> Unit,
     onToggleIndicator: (String) -> Unit,
+    connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTING,
+    lastUpdatedTimestamp: Long = 0L,
     modifier: Modifier = Modifier
 ) {
     var isFullscreen by remember { mutableStateOf(false) }
@@ -135,6 +138,8 @@ fun TradingViewChart(
                     selectedTimeframe = selectedTimeframe,
                     onTimeframeSelected = onTimeframeSelected,
                     onToggleIndicator = onToggleIndicator,
+                    connectionStatus = connectionStatus,
+                    lastUpdatedTimestamp = lastUpdatedTimestamp,
                     isFullscreen = true,
                     onToggleFullscreen = { isFullscreen = false },
                     modifier = Modifier.fillMaxSize()
@@ -155,6 +160,8 @@ fun TradingViewChart(
             selectedTimeframe = selectedTimeframe,
             onTimeframeSelected = onTimeframeSelected,
             onToggleIndicator = onToggleIndicator,
+            connectionStatus = connectionStatus,
+            lastUpdatedTimestamp = lastUpdatedTimestamp,
             isFullscreen = false,
             onToggleFullscreen = { isFullscreen = true },
             modifier = modifier
@@ -177,6 +184,8 @@ private fun ChartCoreContent(
     selectedTimeframe: Timeframe,
     onTimeframeSelected: (Timeframe) -> Unit,
     onToggleIndicator: (String) -> Unit,
+    connectionStatus: ConnectionStatus,
+    lastUpdatedTimestamp: Long,
     isFullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
     modifier: Modifier = Modifier
@@ -241,6 +250,8 @@ private fun ChartCoreContent(
         ChartHeaderBar(
             symbol = analysisResult?.symbol ?: "CHART",
             currentLtp = currentLtp,
+            connectionStatus = connectionStatus,
+            lastUpdatedTimestamp = lastUpdatedTimestamp,
             isFullscreen = isFullscreen,
             activeTool = activeTool,
             drawingCount = drawings.size,
@@ -1030,6 +1041,66 @@ private fun ChartCoreContent(
                 }
             }
 
+            // Non-live historical data banner indicator on chart canvas
+            if (candles.isNotEmpty() && connectionStatus != ConnectionStatus.LIVE) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = BgCardElevated.copy(alpha = 0.92f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, KeyLevelYellow.copy(alpha = 0.6f)),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(KeyLevelYellow)
+                        )
+                        Text(
+                            text = "LAST AVAILABLE / HISTORICAL DATA — NOT LIVE",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = KeyLevelYellow
+                        )
+                    }
+                }
+            }
+
+            // Empty chart state overlay when no ticks / candles received yet
+            if (candles.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Timeline,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Text(
+                        text = "Live chart data unavailable",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "Awaiting Live Feed from Angel One WebSocket",
+                        fontSize = 11.sp,
+                        color = TextTertiary
+                    )
+                }
+            }
+
             // Floating "Jump to Live" button when scrolled back
             if (scrollOffset > 0) {
                 Surface(
@@ -1073,6 +1144,8 @@ private fun ChartCoreContent(
 private fun ChartHeaderBar(
     symbol: String,
     currentLtp: Double,
+    connectionStatus: ConnectionStatus,
+    lastUpdatedTimestamp: Long,
     isFullscreen: Boolean,
     activeTool: ChartTool,
     drawingCount: Int,
@@ -1083,6 +1156,8 @@ private fun ChartHeaderBar(
     onClearDrawings: () -> Unit,
     onToggleFullscreen: () -> Unit
 ) {
+    val isLive = connectionStatus == ConnectionStatus.LIVE
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1090,7 +1165,7 @@ private fun ChartHeaderBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left: Symbol & Price
+        // Left: Symbol & Price + Status Pill
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1101,13 +1176,34 @@ private fun ChartHeaderBar(
                 fontWeight = FontWeight.Black,
                 color = TextPrimary
             )
-            Text(
-                text = "₹${String.format(Locale.US, "%.2f", currentLtp)}",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = CyanAccent
-            )
+            if (currentLtp > 0.0) {
+                Text(
+                    text = "₹${String.format(Locale.US, "%,.2f", currentLtp)}",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (isLive) CyanAccent else TextSecondary
+                )
+                Surface(
+                    shape = RoundedCornerShape(3.dp),
+                    color = if (isLive) BullishGreenBg else KeyLevelYellowBg
+                ) {
+                    Text(
+                        text = if (isLive) "LIVE" else "NOT LIVE",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isLive) BullishGreen else KeyLevelYellow,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            } else {
+                Text(
+                    text = "Price unavailable",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextTertiary
+                )
+            }
         }
 
         // Right: Tool buttons strip

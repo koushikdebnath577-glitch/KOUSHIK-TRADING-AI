@@ -23,10 +23,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.WatchlistEntity
+import com.example.data.model.ConnectionStatus
 import com.example.data.model.IndexItem
 import com.example.data.model.LoadingState
 import com.example.data.model.StockSymbol
 import com.example.data.model.StrategyType
+import com.example.ui.components.formatMarketTimestamp
 import com.example.ui.theme.*
 
 @Composable
@@ -35,18 +37,31 @@ fun IndexDetailScreen(
     constituents: List<StockSymbol>,
     loadingState: LoadingState,
     watchlist: List<WatchlistEntity>,
+    connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTING,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onSelectStockAndAnalyze: (String, StrategyType) -> Unit,
     onToggleWatchlist: (String, String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isLive = connectionStatus == ConnectionStatus.LIVE
     var searchQuery by remember { mutableStateOf("") }
     var selectedSort by remember { mutableStateOf("ALL") }
 
     val watchlistSymbols = remember(watchlist) { watchlist.map { it.symbol }.toSet() }
 
     val isPos = index.change >= 0
+    val displayIndexPrice = when {
+        index.ltp > 0.0 -> index.ltp
+        index.prevClose > 0.0 -> index.prevClose
+        else -> 0.0
+    }
+    val indexPriceLabel = when {
+        isLive && index.ltp > 0.0 -> "LIVE"
+        index.ltp > 0.0 -> "LAST AVAILABLE"
+        index.prevClose > 0.0 -> "PREV CLOSE"
+        else -> "UNAVAILABLE"
+    }
 
     val filteredConstituents = remember(constituents, searchQuery, selectedSort) {
         val base = if (searchQuery.isBlank()) constituents else {
@@ -167,34 +182,58 @@ fun IndexDetailScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "INDEX PRICE (LTP)",
+                                    text = if (isLive) "INDEX PRICE (LTP)" else "$indexPriceLabel PRICE",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextTertiary,
+                                    color = if (isLive) TextTertiary else KeyLevelYellow,
                                     letterSpacing = 0.5.sp
                                 )
-                                Text(
-                                    text = "₹${String.format(java.util.Locale.US, "%,.2f", index.ltp)}",
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = TextPrimary
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isPos) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
-                                        contentDescription = null,
-                                        tint = if (isPos) BullishGreen else BearishRed,
-                                        modifier = Modifier.size(14.dp)
+                                if (displayIndexPrice > 0.0) {
+                                    Text(
+                                        text = "₹${String.format(java.util.Locale.US, "%,.2f", displayIndexPrice)}",
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary
+                                    )
+                                    if (isLive) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isPos) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                                                contentDescription = null,
+                                                tint = if (isPos) BullishGreen else BearishRed,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Text(
+                                                text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.change)} (${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.changePercent)}%)",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isPos) BullishGreen else BearishRed
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "NOT LIVE • LIVE DATA UNAVAILABLE",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = KeyLevelYellow
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "Price unavailable",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextTertiary
                                     )
                                     Text(
-                                        text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.change)} (${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.changePercent)}%)",
-                                        fontSize = 12.sp,
+                                        text = "LIVE DATA UNAVAILABLE",
+                                        fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isPos) BullishGreen else BearishRed
+                                        color = KeyLevelYellow
                                     )
                                 }
                             }
@@ -512,19 +551,65 @@ fun IndexDetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = "₹${String.format(java.util.Locale.US, "%.2f", stock.ltp)}",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = TextPrimary
-                                    )
-                                    Text(
-                                        text = "${if (isStockPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (isStockPos) BullishGreen else BearishRed
-                                    )
+                                    val displayPrice = when {
+                                        stock.ltp > 0.0 -> stock.ltp
+                                        stock.previousClose > 0.0 -> stock.previousClose
+                                        else -> 0.0
+                                    }
+                                    val priceLabel = when {
+                                        isLive && stock.ltp > 0.0 -> "LIVE"
+                                        stock.ltp > 0.0 -> "LAST AVAILABLE"
+                                        stock.previousClose > 0.0 -> "PREV CLOSE"
+                                        else -> "UNAVAILABLE"
+                                    }
+                                    val formattedTime = formatMarketTimestamp(stock.lastUpdated)
+
+                                    if (displayPrice > 0.0) {
+                                        Text(
+                                            text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = if (isLive) (if (isStockPos) BullishGreen else BearishRed) else TextPrimary
+                                        )
+                                        if (isLive) {
+                                            Text(
+                                                text = "${if (isStockPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (isStockPos) BullishGreen else BearishRed
+                                            )
+                                        } else {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Text(
+                                                    text = "$priceLabel • NOT LIVE",
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = KeyLevelYellow
+                                                )
+                                                if (formattedTime.isNotEmpty()) {
+                                                    Text(
+                                                        text = "• $formattedTime",
+                                                        fontSize = 8.sp,
+                                                        color = TextTertiary
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "Price unavailable",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TextTertiary
+                                        )
+                                        Text(
+                                            text = "LIVE DATA UNAVAILABLE",
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = KeyLevelYellow
+                                        )
+                                    }
                                 }
 
                                 // Analyze strategy button

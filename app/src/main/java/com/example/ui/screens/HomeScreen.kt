@@ -22,18 +22,21 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.ConnectionStatus
 import com.example.data.model.IndexItem
 import com.example.data.model.SetupGrade
 import com.example.data.model.StockSymbol
 import com.example.data.model.StrategyType
 import com.example.data.repository.IndicesDataProvider
 import com.example.ui.components.DisclaimerBanner
+import com.example.ui.components.formatMarketTimestamp
 import com.example.ui.theme.*
 
 @Composable
 fun HomeScreen(
     symbols: List<StockSymbol>,
     indices: List<IndexItem> = emptyList(),
+    connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTING,
     defaultRiskAmount: Double = 2500.0,
     onEditRisk: () -> Unit = {},
     onSelectIndex: (IndexItem) -> Unit = {},
@@ -44,6 +47,15 @@ fun HomeScreen(
 ) {
     val displayIndices = if (indices.isNotEmpty()) indices else IndicesDataProvider.DEFAULT_INDICES
     val stockSymbols = symbols.filter { sym -> displayIndices.none { it.symbol == sym.symbol || it.alias == sym.symbol } }
+    val isLive = connectionStatus == ConnectionStatus.LIVE
+
+    val headerStatusColor = when (connectionStatus) {
+        ConnectionStatus.LIVE -> BullishGreen
+        ConnectionStatus.CONNECTED_WAITING_FOR_TICK -> CyanAccent
+        ConnectionStatus.CONNECTING -> KeyLevelYellow
+        ConnectionStatus.DISCONNECTED -> BearishRed
+        ConnectionStatus.ERROR -> BearishRed
+    }
 
     var selectedIndexCategory by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("ALL") }
 
@@ -90,16 +102,21 @@ fun HomeScreen(
 
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = CyanAccentBg,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f))
+                    color = headerStatusColor.copy(alpha = 0.12f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, headerStatusColor.copy(alpha = 0.4f))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(BullishGreen))
-                        Text(text = "NSE LIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(headerStatusColor))
+                        Text(
+                            text = if (isLive) "NSE LIVE" else connectionStatus.label,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = headerStatusColor
+                        )
                     }
                 }
             }
@@ -268,6 +285,7 @@ fun HomeScreen(
                     items(filteredIndices, key = { it.symbol }) { idx ->
                         IndexCard(
                             index = idx,
+                            isLive = isLive,
                             onClick = { onSelectIndex(idx) }
                         )
                     }
@@ -340,6 +358,7 @@ fun HomeScreen(
         items(stockSymbols.take(5)) { stock ->
             StockItemCard(
                 stock = stock,
+                isLive = isLive,
                 onClick = { onSelectStockAndAnalyze(stock.symbol, StrategyType.RESISTANCE_REJECTION) }
             )
         }
@@ -353,9 +372,22 @@ fun HomeScreen(
 @Composable
 private fun IndexCard(
     index: IndexItem,
+    isLive: Boolean,
     onClick: () -> Unit
 ) {
     val isPos = index.change >= 0
+    val displayPrice = when {
+        index.ltp > 0.0 -> index.ltp
+        index.prevClose > 0.0 -> index.prevClose
+        else -> 0.0
+    }
+    val priceLabel = when {
+        isLive && index.ltp > 0.0 -> "LIVE"
+        index.ltp > 0.0 -> "LAST AVAILABLE"
+        index.prevClose > 0.0 -> "PREV CLOSE"
+        else -> "UNAVAILABLE"
+    }
+
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
@@ -365,12 +397,6 @@ private fun IndexCard(
             .width(160.dp)
             .testTag("index_card_${index.symbol}")
     ) {
-        // Audit log for HomeScreen displayed value
-        android.util.Log.i(
-            "DATA_AUDIT",
-            "[DATA AUDIT: HOMESCREEN DISPLAY] Index: ${index.symbol} | Token: ${index.token} | Displayed Value: ${if (index.ltp > 0) "₹" + String.format(java.util.Locale.US, "%,.2f", index.ltp) else "LIVE DATA UNAVAILABLE"}"
-        )
-
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -399,13 +425,13 @@ private fun IndexCard(
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
-            if (index.ltp > 0.0) {
+            if (displayPrice > 0.0) {
                 Text(
-                    text = "₹${String.format(java.util.Locale.US, "%,.2f", index.ltp)}",
+                    text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    color = TextPrimary
+                    color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(
@@ -413,12 +439,21 @@ private fun IndexCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.changePercent)}%",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isPos) BullishGreen else BearishRed
-                    )
+                    if (isLive) {
+                        Text(
+                            text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.changePercent)}%",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isPos) BullishGreen else BearishRed
+                        )
+                    } else {
+                        Text(
+                            text = "$priceLabel • NOT LIVE",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = KeyLevelYellow
+                        )
+                    }
                     Text(
                         text = index.category,
                         fontSize = 8.sp,
@@ -427,16 +462,17 @@ private fun IndexCard(
                 }
             } else {
                 Text(
-                    text = "Live data unavailable",
-                    fontSize = 10.sp,
+                    text = "Price unavailable",
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = TextTertiary
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Awaiting Live Feed",
+                    text = "LIVE DATA UNAVAILABLE",
                     fontSize = 8.sp,
-                    color = TextTertiary
+                    fontWeight = FontWeight.Bold,
+                    color = KeyLevelYellow
                 )
             }
         }
@@ -487,10 +523,24 @@ private fun StrategyHeroCard(
 @Composable
 fun StockItemCard(
     stock: StockSymbol,
+    isLive: Boolean = true,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isPos = stock.change >= 0
+    val displayPrice = when {
+        stock.ltp > 0.0 -> stock.ltp
+        stock.previousClose > 0.0 -> stock.previousClose
+        else -> 0.0
+    }
+    val priceLabel = when {
+        isLive && stock.ltp > 0.0 -> "LIVE"
+        stock.ltp > 0.0 -> "LAST AVAILABLE"
+        stock.previousClose > 0.0 -> "PREV CLOSE"
+        else -> "UNAVAILABLE"
+    }
+    val formattedTime = formatMarketTimestamp(stock.lastUpdated)
+
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
@@ -518,26 +568,50 @@ fun StockItemCard(
             }
 
             Column(horizontalAlignment = Alignment.End) {
-                if (stock.ltp > 0.0) {
+                if (displayPrice > 0.0) {
                     Text(
-                        text = "₹${String.format(java.util.Locale.US, "%.2f", stock.ltp)}",
+                        text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        color = TextPrimary
+                        color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary
                     )
-                    Text(
-                        text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.change)} (${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%)",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (isPos) BullishGreen else BearishRed
-                    )
+                    if (isLive) {
+                        Text(
+                            text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.change)} (${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isPos) BullishGreen else BearishRed
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                text = "$priceLabel • NOT LIVE",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = KeyLevelYellow
+                            )
+                            if (formattedTime.isNotEmpty()) {
+                                Text(
+                                    text = "• $formattedTime",
+                                    fontSize = 8.sp,
+                                    color = TextTertiary
+                                )
+                            }
+                        }
+                    }
                 } else {
                     Text(
-                        text = "Live data unavailable",
+                        text = "Price unavailable",
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = FontWeight.SemiBold,
                         color = TextTertiary
+                    )
+                    Text(
+                        text = "LIVE DATA UNAVAILABLE",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = KeyLevelYellow
                     )
                 }
             }
