@@ -345,8 +345,9 @@ private fun ChartCoreContent(
                     .fillMaxWidth()
                     .padding(horizontal = 10.dp, vertical = 3.dp)
                     .background(BgCardElevated, RoundedCornerShape(6.dp))
+                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -1168,13 +1169,15 @@ private fun ChartHeaderBar(
         // Left: Symbol & Price + Status Pill
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(end = 6.dp)
         ) {
             Text(
                 text = symbol,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Black,
-                color = TextPrimary
+                color = TextPrimary,
+                maxLines = 1
             )
             if (currentLtp > 0.0) {
                 Text(
@@ -1182,7 +1185,8 @@ private fun ChartHeaderBar(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    color = if (isLive) CyanAccent else TextSecondary
+                    color = if (isLive) CyanAccent else TextSecondary,
+                    maxLines = 1
                 )
                 Surface(
                     shape = RoundedCornerShape(3.dp),
@@ -1201,15 +1205,19 @@ private fun ChartHeaderBar(
                     text = "Price unavailable",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextTertiary
+                    color = TextTertiary,
+                    maxLines = 1
                 )
             }
         }
 
-        // Right: Tool buttons strip
+        // Right: Tool buttons strip (scrollable horizontally if constrained)
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .horizontalScroll(rememberScrollState())
         ) {
             // Crosshair Tool
             ChartToolIconButton(

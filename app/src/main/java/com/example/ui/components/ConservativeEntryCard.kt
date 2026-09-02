@@ -50,7 +50,11 @@ fun ConservativeEntryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Default.Shield,
                         contentDescription = null,
@@ -62,7 +66,8 @@ fun ConservativeEntryCard(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent,
-                        letterSpacing = 0.8.sp
+                        letterSpacing = 0.8.sp,
+                        maxLines = 1
                     )
                 }
 
@@ -71,7 +76,8 @@ fun ConservativeEntryCard(
                     Surface(
                         shape = RoundedCornerShape(4.dp),
                         color = OrangeWarningBg,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, OrangeWarning.copy(alpha = 0.4f))
+                        border = androidx.compose.foundation.BorderStroke(1.dp, OrangeWarning.copy(alpha = 0.4f)),
+                        modifier = Modifier.wrapContentWidth()
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -88,7 +94,8 @@ fun ConservativeEntryCard(
                                 text = "WAIT FOR CANDLE CLOSE",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = OrangeWarning
+                                color = OrangeWarning,
+                                maxLines = 1
                             )
                         }
                     }
@@ -243,44 +250,51 @@ fun ConservativeEntryCard(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(BgDarkNavy)
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text(text = "Recommended Qty", fontSize = 9.sp, color = TextSecondary)
+                            Column(modifier = Modifier.weight(1.1f)) {
+                                Text(text = "Rec. Qty", fontSize = 9.sp, color = TextSecondary, maxLines = 1)
                                 Text(
                                     text = "$calculatedQty shares",
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = CyanAccent
+                                    color = CyanAccent,
+                                    maxLines = 1
                                 )
                             }
-                            Column {
-                                Text(text = "Total Risk @ SL", fontSize = 9.sp, color = TextSecondary)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = "Risk @ SL", fontSize = 9.sp, color = TextSecondary, maxLines = 1)
                                 Text(
                                     text = "₹${String.format(java.util.Locale.US, "%.1f", totalRiskAtSL)}",
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = BearishRed
+                                    color = BearishRed,
+                                    maxLines = 1
                                 )
                             }
-                            Column {
-                                Text(text = "Profit @ T1", fontSize = 9.sp, color = TextSecondary)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = "Profit @ T1", fontSize = 9.sp, color = TextSecondary, maxLines = 1)
                                 Text(
                                     text = "+₹${String.format(java.util.Locale.US, "%.1f", totalRewardAtT1)}",
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = BullishGreen
+                                    color = BullishGreen,
+                                    maxLines = 1
                                 )
                             }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(text = "Risk : Reward", fontSize = 9.sp, color = TextSecondary)
+                            Column(
+                                modifier = Modifier.weight(0.9f),
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                Text(text = "R : R", fontSize = 9.sp, color = TextSecondary, maxLines = 1)
                                 Text(
                                     text = "1 : ${activePlan.riskRewardRatio}",
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = if (activePlan.riskRewardRatio >= 1.5) BullishGreen else OrangeWarning
+                                    color = if (activePlan.riskRewardRatio >= 1.5) BullishGreen else OrangeWarning,
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -309,7 +323,8 @@ fun ConservativeEntryCard(
                         text = activePlan.executionRequirement,
                         fontSize = 11.sp,
                         color = TextSecondary,
-                        lineHeight = 15.sp
+                        lineHeight = 15.sp,
+                        modifier = Modifier.weight(1f)
                     )
                 }
             } else {

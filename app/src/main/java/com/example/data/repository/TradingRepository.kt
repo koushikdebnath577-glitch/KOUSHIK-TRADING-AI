@@ -229,12 +229,15 @@ class TradingRepository(
     }
 
     private fun handleLiveTick(tick: LiveTick) {
-        // Update index state if this tick belongs to an index
+        // 1. Update index state if this tick belongs to an index
         val currentIndices = _indices.value.toMutableList()
         val indexIdx = currentIndices.indexOfFirst {
             it.token == tick.token ||
             it.symbol.equals(tick.symbol, ignoreCase = true) ||
-            (it.alias != null && it.alias.equals(tick.symbol, ignoreCase = true))
+            (it.alias != null && it.alias.equals(tick.symbol, ignoreCase = true)) ||
+            (tick.token == "99926000" && it.symbol == "NIFTY 50") ||
+            (tick.token == "99926009" && it.symbol in listOf("BANKNIFTY", "NIFTY BANK")) ||
+            (tick.token == "99926037" && it.symbol in listOf("FINNIFTY", "NIFTY FINANCIAL SERVICES"))
         }
         if (indexIdx >= 0) {
             val oldIdx = currentIndices[indexIdx]
@@ -256,13 +259,41 @@ class TradingRepository(
             android.util.Log.i("DATA_AUDIT", "[DATA AUDIT: REPOSITORY UPDATED INDEX] Symbol: ${oldIdx.symbol} | Token: ${oldIdx.token} | Live LTP: ${tick.ltp}")
         }
 
-        if (tick.symbol == _selectedSymbol.value) {
-            val agg = aggregator ?: return
+        // 2. Check if this tick matches the currently selected chart symbol
+        val isSelected = tick.symbol.equals(_selectedSymbol.value, ignoreCase = true) ||
+            (tick.token == "99926000" && (_selectedSymbol.value == "NIFTY 50" || _selectedSymbol.value == "NIFTY")) ||
+            (tick.token == "99926009" && _selectedSymbol.value in listOf("BANKNIFTY", "NIFTY BANK")) ||
+            (tick.token == "99926037" && _selectedSymbol.value in listOf("FINNIFTY", "NIFTY FINANCIAL SERVICES")) ||
+            marketSymbols.value.find { it.token == tick.token }?.symbol.equals(_selectedSymbol.value, ignoreCase = true)
+
+        if (isSelected) {
+            var agg = aggregator
+            if (agg == null) {
+                val initialCandles = if (_activeCandles.value.isNotEmpty()) {
+                    _activeCandles.value
+                } else {
+                    listOf(
+                        Candle(
+                            timestamp = tick.timestamp,
+                            open = tick.ltp,
+                            high = tick.ltp,
+                            low = tick.ltp,
+                            close = tick.ltp,
+                            volume = tick.volume,
+                            isComplete = false
+                        )
+                    )
+                }
+                agg = CandleAggregator(_selectedTimeframe.value, initialCandles)
+                aggregator = agg
+            }
+
             val updatedCandle = agg.processTick(tick)
             _activeCandles.value = agg.candles
+            android.util.Log.i("CHART_DATA", "[CHART_DATA] Tick updated chart for ${_selectedSymbol.value} (Token: ${tick.token}) - LTP: ${tick.ltp} Total Candles: ${agg.candles.size}")
 
             // Refresh key levels and analysis
-            val stock = marketSymbols.value.find { it.symbol == tick.symbol }
+            val stock = marketSymbols.value.find { it.symbol == _selectedSymbol.value }
             val prevClose = stock?.previousClose ?: tick.ltp
             _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, tick.ltp, prevClose)
 

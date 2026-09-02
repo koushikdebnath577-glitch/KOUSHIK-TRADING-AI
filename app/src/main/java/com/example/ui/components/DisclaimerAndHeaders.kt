@@ -123,20 +123,28 @@ fun ConnectionStatusHeader(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Left: App name + Stock symbol + Connection Status Pill
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.weight(1f).padding(end = 8.dp)
+            ) {
                 Text(
                     text = "KOUSHIK TRADING AI",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextSecondary,
-                    letterSpacing = 0.8.sp
+                    letterSpacing = 0.8.sp,
+                    maxLines = 1
                 )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Text(
                         text = selectedSymbol,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1
                     )
                     Surface(
                         onClick = onReconnectClick,
@@ -159,7 +167,8 @@ fun ConnectionStatusHeader(
                                 text = status.label,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = statusColor
+                                color = statusColor,
+                                maxLines = 1
                             )
                         }
                     }
@@ -167,10 +176,37 @@ fun ConnectionStatusHeader(
             }
 
             // Right: Price & Change in monospace
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.wrapContentWidth()
+            ) {
                 if (displayPrice > 0.0) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (!isLive) {
+                    Text(
+                        text = "₹${String.format(Locale.US, "%,.2f", displayPrice)}",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (isLive) (if (isPositive) BullishGreen else BearishRed) else TextPrimary,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+
+                    if (isLive) {
+                        Text(
+                            text = "${if (isPositive) "+" else ""}${String.format(Locale.US, "%.2f", change)} (${if (isPositive) "+" else ""}${String.format(Locale.US, "%.2f", changePercent)}%)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isPositive) BullishGreen else BearishRed,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.wrapContentWidth()
+                        ) {
                             Surface(
                                 shape = RoundedCornerShape(3.dp),
                                 color = KeyLevelYellowBg
@@ -180,39 +216,18 @@ fun ConnectionStatusHeader(
                                     fontSize = 8.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = KeyLevelYellow,
-                                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
-                        }
-                        Text(
-                            text = "₹${String.format(Locale.US, "%,.2f", displayPrice)}",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = if (isLive) (if (isPositive) BullishGreen else BearishRed) else TextPrimary
-                        )
-                    }
-
-                    if (isLive) {
-                        Text(
-                            text = "${if (isPositive) "+" else ""}${String.format(Locale.US, "%.2f", change)} (${if (isPositive) "+" else ""}${String.format(Locale.US, "%.2f", changePercent)}%)",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (isPositive) BullishGreen else BearishRed
-                        )
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = "NOT LIVE",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextTertiary
-                            )
                             if (formattedTime.isNotEmpty()) {
                                 Text(
-                                    text = "• $formattedTime",
-                                    fontSize = 9.sp,
-                                    color = TextTertiary
+                                    text = formattedTime,
+                                    fontSize = 8.sp,
+                                    color = TextTertiary,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -222,13 +237,17 @@ fun ConnectionStatusHeader(
                         text = "Price unavailable",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextTertiary
+                        color = TextTertiary,
+                        maxLines = 1,
+                        softWrap = false
                     )
                     Text(
                         text = "LIVE DATA UNAVAILABLE",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = KeyLevelYellow
+                        color = KeyLevelYellow,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
@@ -283,7 +302,11 @@ fun KeyLevelsSummaryList(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 4.dp)
+                        ) {
                             Box(
                                 modifier = Modifier
                                     .size(6.dp)
@@ -294,11 +317,16 @@ fun KeyLevelsSummaryList(
                                 text = level.type.displayName,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1
                             )
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.wrapContentWidth()
+                        ) {
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
                                 color = when (level.strength) {

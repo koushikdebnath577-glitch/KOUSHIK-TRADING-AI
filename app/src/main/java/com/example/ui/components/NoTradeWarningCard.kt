@@ -36,7 +36,8 @@ fun NoTradeWarningCard(
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(
                     imageVector = Icons.Default.Block,
@@ -44,7 +45,7 @@ fun NoTradeWarningCard(
                     tint = BearishRed,
                     modifier = Modifier.size(20.dp)
                 )
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = warningTitle,
                         fontSize = 13.sp,
@@ -79,6 +80,7 @@ fun NoTradeWarningCard(
 
                 reasonsToAvoid.forEach { reason ->
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -87,7 +89,8 @@ fun NoTradeWarningCard(
                             text = reason,
                             fontSize = 11.sp,
                             color = TextPrimary,
-                            lineHeight = 15.sp
+                            lineHeight = 15.sp,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }

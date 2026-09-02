@@ -53,13 +53,15 @@ fun ConfirmationStatusBadge(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = CyanAccent,
-                    letterSpacing = 0.8.sp
+                    letterSpacing = 0.8.sp,
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp)
                 )
 
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = badgeBg,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, badgeColor.copy(alpha = 0.35f))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, badgeColor.copy(alpha = 0.35f)),
+                    modifier = Modifier.wrapContentWidth()
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -71,7 +73,8 @@ fun ConfirmationStatusBadge(
                             text = status.label,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = badgeColor
+                            color = badgeColor,
+                            maxLines = 1
                         )
                     }
                 }
@@ -89,11 +92,18 @@ fun ConfirmationStatusBadge(
             ) {
                 details.forEach { item ->
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(text = "✓", color = badgeColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text(text = item, fontSize = 11.sp, color = TextSecondary, lineHeight = 14.sp)
+                        Text(
+                            text = item,
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            lineHeight = 15.sp,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }

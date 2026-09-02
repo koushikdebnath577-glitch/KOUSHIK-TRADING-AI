@@ -237,7 +237,7 @@ class SmartApiBackendClient {
 
         try {
             val targetWsUrl = backendConfig.wsUrl
-            Log.i(TAG, "[WS INITIATING]\nBACKEND URL: ${backendConfig.apiBaseUrl}\nWebSocket URL: $targetWsUrl\nWebSocket connection state: ${_connectionStatus.value.label}")
+            Log.i("WEBSOCKET_CONNECT", "[WEBSOCKET_CONNECT] Initiating connection to $targetWsUrl | Backend: ${backendConfig.apiBaseUrl}")
 
             val request = Request.Builder()
                 .url(targetWsUrl)
@@ -248,34 +248,79 @@ class SmartApiBackendClient {
                     isWebSocketActive = true
                     _connectionStatus.value = ConnectionStatus.CONNECTED_WAITING_FOR_TICK
                     Log.i(
-                        TAG,
-                        "[WS OPEN]\n" +
-                        "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
-                        "WebSocket URL: $targetWsUrl\n" +
-                        "WebSocket connection state: ${_connectionStatus.value.label}\n" +
-                        "HTTP response code: ${response.code}\n" +
-                        "HTTP response message: ${response.message}"
+                        "WEBSOCKET_CONNECT",
+                        "[WEBSOCKET_CONNECT] Connected successfully to $targetWsUrl | HTTP: ${response.code} ${response.message} | State: ${_connectionStatus.value.label}"
                     )
 
-                    // Send subscription payload for all monitored tokens
-                    val tokensJson = JSONArray()
-                    _marketSymbols.value.forEach { tokensJson.put(it.token) }
+                    // Collect all market tokens including NIFTY 50 (99926000), BANKNIFTY (99926009), FINNIFTY (99926037)
+                    val allTokens = mutableSetOf<String>()
+                    allTokens.add("99926000") // NIFTY 50 explicitly
+                    allTokens.add("99926009") // BANKNIFTY explicitly
+                    allTokens.add("99926037") // FINNIFTY explicitly
+                    IndicesDataProvider.DEFAULT_INDICES.forEach { if (it.token.isNotEmpty()) allTokens.add(it.token) }
+                    _marketSymbols.value.forEach { if (it.token.isNotEmpty()) allTokens.add(it.token) }
 
-                    val subPayload = JSONObject().apply {
+                    val tokensJson = JSONArray()
+                    allTokens.forEach { tokensJson.put(it) }
+
+                    Log.i(
+                        "NIFTY_SUBSCRIBE",
+                        "[NIFTY_SUBSCRIBE] Subscribing token 99926000 (NIFTY 50) and ${allTokens.size} total instruments on WebSocket"
+                    )
+
+                    // Format 1: Backend proxy action format
+                    val subPayload1 = JSONObject().apply {
                         put("action", "subscribe")
                         put("exchangeType", 1)
                         put("tokens", tokensJson)
                     }
+                    webSocket.send(subPayload1.toString())
 
-                    webSocket.send(subPayload.toString())
-                    Log.i(TAG, "Sent subscription payload for ${_marketSymbols.value.size} tokens")
+                    // Format 2: SmartAPI standard protocol format
+                    val tokenListObj = JSONObject().apply {
+                        put("exchangeType", 1)
+                        put("tokens", tokensJson)
+                    }
+                    val tokenListArray = JSONArray().apply { put(tokenListObj) }
+                    val paramsObj = JSONObject().apply {
+                        put("mode", 1)
+                        put("tokenList", tokenListArray)
+                    }
+                    val subPayload2 = JSONObject().apply {
+                        put("correlationID", "nifty_sub_live")
+                        put("action", 1)
+                        put("params", paramsObj)
+                    }
+                    webSocket.send(subPayload2.toString())
 
-                    // Immediately synchronize real quotes via REST while waiting for live ticks
+                    // Format 3: Direct type subscribe
+                    val subPayload3 = JSONObject().apply {
+                        put("type", "subscribe")
+                        put("tokens", tokensJson)
+                    }
+                    webSocket.send(subPayload3.toString())
+
+                    Log.i("NIFTY_SUBSCRIBE", "[NIFTY_SUBSCRIBE] Sent subscription payloads for token 99926000 & all market symbols")
+
+                    // Synchronize real quotes via REST while waiting for live ticks
                     syncInitialQuotes()
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     handleIncomingWebSocketMessage(text)
+                }
+
+                override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                    val text = try {
+                        bytes.utf8()
+                    } catch (e: Exception) {
+                        ""
+                    }
+                    if (text.isNotEmpty() && (text.startsWith("{") || text.startsWith("["))) {
+                        handleIncomingWebSocketMessage(text)
+                    } else {
+                        parseBinarySmartApiPacket(bytes.toByteArray())
+                    }
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -315,62 +360,71 @@ class SmartApiBackendClient {
         }
     }
 
+    private fun parseBinarySmartApiPacket(data: ByteArray) {
+        if (data.size < 27) return
+        try {
+            // Mode 1/2/3 Angel One binary tick parser
+            val tokenBytes = ByteArray(25)
+            System.arraycopy(data, 2, tokenBytes, 0, 25)
+            val token = String(tokenBytes).trim().replace("\u0000", "")
+            if (token.isEmpty()) return
+
+            val buffer = java.nio.ByteBuffer.wrap(data).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            val rawLtp = if (data.size >= 35) buffer.getLong(27) else buffer.getInt(27).toLong()
+            val ltp = if (rawLtp > 0) rawLtp / 100.0 else 0.0
+
+            if (ltp > 0.0) {
+                processExtractedTick(
+                    token = token,
+                    symbol = resolveSymbolForToken(token),
+                    exchange = "NSE",
+                    ltp = ltp,
+                    angelOneLtp = ltp,
+                    backendForwardedLtp = ltp,
+                    change = 0.0,
+                    changePercent = 0.0,
+                    volume = 0L,
+                    timestamp = System.currentTimeMillis()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing binary packet: ${e.message}")
+        }
+    }
+
     private fun handleIncomingWebSocketMessage(text: String) {
         try {
-            val json = JSONObject(text)
-            val type = json.optString("type", "")
+            val trimmed = text.trim()
+            if (trimmed.startsWith("[")) {
+                val array = JSONArray(trimmed)
+                for (i in 0 until array.length()) {
+                    val item = array.optJSONObject(i) ?: continue
+                    parseJsonTickObject(item)
+                }
+                return
+            }
 
+            val json = JSONObject(trimmed)
+
+            // Handle nested ticks array if present
+            val ticksArray = json.optJSONArray("ticks") ?: json.optJSONArray("data")
+            if (ticksArray != null) {
+                for (i in 0 until ticksArray.length()) {
+                    val item = ticksArray.optJSONObject(i) ?: continue
+                    parseJsonTickObject(item)
+                }
+            }
+
+            // Handle nested data object if present
+            val dataObj = json.optJSONObject("data")
+            if (dataObj != null) {
+                parseJsonTickObject(dataObj)
+            }
+
+            val type = json.optString("type", json.optString("action", ""))
             when (type) {
-                "tick" -> {
-                    val token = json.optString("token", "")
-                    val symbol = json.optString("symbol", "")
-                    val exchange = json.optString("exchange", "NSE")
-                    val ltp = json.optDouble("ltp", 0.0)
-                    val angelOneLtp = json.optDouble("angelOneLtp", ltp)
-                    val backendForwardedLtp = json.optDouble("backendForwardedLtp", ltp)
-                    val change = json.optDouble("change", 0.0)
-                    val changePercent = json.optDouble("changePercent", 0.0)
-                    val volume = json.optLong("volume", 0L)
-                    val timestamp = json.optLong("timestamp", System.currentTimeMillis())
-
-                    if (token.isNotEmpty() && ltp > 0.0) {
-                        lastTickReceivedAt = System.currentTimeMillis()
-                        _connectionStatus.value = ConnectionStatus.LIVE
-
-                        val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(lastTickReceivedAt))
-                        Log.i(
-                            TAG,
-                            "[LIVE TICK RECEIVED]\n" +
-                            "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
-                            "WebSocket connection state: ${_connectionStatus.value.label}\n" +
-                            "Token: $token | Symbol: $symbol | Exchange: $exchange\n" +
-                            "LTP: $ltp | Change: $change ($changePercent%)\n" +
-                            "last tick received timestamp: $lastTickReceivedAt ($dateStr)\n" +
-                            "Angel One LTP: $angelOneLtp | Backend Forwarded LTP: $backendForwardedLtp"
-                        )
-                        Log.i(
-                            "LIVE DATA",
-                            "[LIVE DATA]\ntoken: $token\nsymbol: $symbol\nltp: $ltp\nexchangeTimestamp: $timestamp\nreceivedAt: $lastTickReceivedAt\nsource=ANGEL_ONE"
-                        )
-                        Log.i(
-                            "DATA_AUDIT",
-                            "[DATA AUDIT: ANDROID RECEIVED] Symbol: $symbol | Exchange: $exchange | Token: $token | Timestamp: $timestamp | Angel One LTP: $angelOneLtp | Backend Forwarded LTP: $backendForwardedLtp | App Received LTP: $ltp"
-                        )
-                        updateSymbolFromTick(token, symbol, ltp, change, changePercent, volume, timestamp)
-
-                        // Also emit live tick for indices and non-stock instruments
-                        scope.launch {
-                            _tickFlow.emit(
-                                LiveTick(
-                                    token = token,
-                                    symbol = symbol,
-                                    ltp = ltp,
-                                    volume = volume,
-                                    timestamp = timestamp
-                                )
-                            )
-                        }
-                    }
+                "tick", "quote", "live_tick", "market_tick", "ltp", "" -> {
+                    parseJsonTickObject(json)
                 }
                 "candle" -> {
                     val token = json.optString("token", "")
@@ -386,7 +440,6 @@ class SmartApiBackendClient {
                             volume = candleObj.optLong("volume", 0L),
                             isComplete = candleObj.optBoolean("isComplete", false)
                         )
-                        // If token matches any symbol, update candle
                         val stock = _marketSymbols.value.find { it.token == token }
                         if (stock != null) {
                             val tf = when (interval.lowercase()) {
@@ -407,11 +460,105 @@ class SmartApiBackendClient {
                     }
                 }
                 "subscribed" -> {
-                    Log.i(TAG, "[BACKEND SUBSCRIPTION CONFIRMED] Tokens count: ${json.optJSONArray("tokens")?.length()}")
+                    Log.i("NIFTY_SUBSCRIBE", "[NIFTY_SUBSCRIBE] Subscription confirmed by backend: ${json.optJSONArray("tokens")?.length() ?: 0} tokens")
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing WS message: ${e.message}")
+        }
+    }
+
+    private fun parseJsonTickObject(json: JSONObject) {
+        val token = json.optString("token", json.optString("symbolToken", json.optString("symbol_token", json.optString("tk", json.optString("t", "")))))
+        if (token.isEmpty()) return
+
+        var symbol = json.optString("symbol", json.optString("tradingSymbol", json.optString("ts", "")))
+        if (symbol.isEmpty()) {
+            symbol = resolveSymbolForToken(token)
+        }
+
+        val exchange = json.optString("exchange", json.optString("e", "NSE"))
+        var ltp = json.optDouble("ltp", json.optDouble("lastPrice", json.optDouble("last_price", json.optDouble("close", json.optDouble("c", json.optDouble("price", json.optDouble("lp", 0.0)))))))
+        if (ltp > 10_000_000.0) {
+            ltp = ltp / 100.0
+        }
+
+        val angelOneLtp = json.optDouble("angelOneLtp", ltp)
+        val backendForwardedLtp = json.optDouble("backendForwardedLtp", ltp)
+        val change = json.optDouble("change", json.optDouble("netChange", json.optDouble("ch", 0.0)))
+        val changePercent = json.optDouble("changePercent", json.optDouble("percentChange", json.optDouble("chp", json.optDouble("pChange", 0.0))))
+        val volume = json.optLong("volume", json.optLong("tradeVolume", json.optLong("v", json.optLong("vol", 0L))))
+        val timestamp = json.optLong("timestamp", json.optLong("exchangeTimestamp", json.optLong("time", System.currentTimeMillis())))
+
+        if (ltp > 0.0) {
+            processExtractedTick(
+                token = token,
+                symbol = symbol,
+                exchange = exchange,
+                ltp = ltp,
+                angelOneLtp = angelOneLtp,
+                backendForwardedLtp = backendForwardedLtp,
+                change = change,
+                changePercent = changePercent,
+                volume = volume,
+                timestamp = timestamp
+            )
+        }
+    }
+
+    private fun resolveSymbolForToken(token: String): String {
+        if (token == "99926000" || token == "26000") return "NIFTY 50"
+        if (token == "99926009" || token == "26009") return "BANKNIFTY"
+        if (token == "99926037" || token == "26037") return "FINNIFTY"
+        val idx = IndicesDataProvider.DEFAULT_INDICES.find { it.token == token }
+        if (idx != null) return idx.symbol
+        val stock = _marketSymbols.value.find { it.token == token }
+        if (stock != null) return stock.symbol
+        return token
+    }
+
+    private fun processExtractedTick(
+        token: String,
+        symbol: String,
+        exchange: String,
+        ltp: Double,
+        angelOneLtp: Double,
+        backendForwardedLtp: Double,
+        change: Double,
+        changePercent: Double,
+        volume: Long,
+        timestamp: Long
+    ) {
+        lastTickReceivedAt = System.currentTimeMillis()
+        _connectionStatus.value = ConnectionStatus.LIVE
+
+        val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(lastTickReceivedAt))
+        
+        Log.i("ANGELONE_RAW_TICK", "[ANGELONE_RAW_TICK] Token: $token | Symbol: $symbol | Raw Angel LTP: $angelOneLtp | Volume: $volume | Timestamp: $timestamp")
+        Log.i("BACKEND_FORWARD", "[BACKEND_FORWARD] Token: $token | Symbol: $symbol | Forwarded LTP: $backendForwardedLtp | Timestamp: $timestamp")
+        Log.i("ANDROID_RECEIVED", "[ANDROID_RECEIVED] Status: LIVE | Symbol: $symbol | Token: $token | LTP: $ltp | Timestamp: $timestamp")
+        Log.i(
+            "LIVE DATA",
+            "[LIVE DATA]\ntoken: $token\nsymbol: $symbol\nltp: $ltp\nexchangeTimestamp: $timestamp\nreceivedAt: $lastTickReceivedAt\nsource=ANGEL_ONE"
+        )
+        Log.i(
+            "DATA_AUDIT",
+            "[DATA AUDIT: ANDROID RECEIVED] Symbol: $symbol | Exchange: $exchange | Token: $token | Timestamp: $timestamp | Angel One LTP: $angelOneLtp | Backend Forwarded LTP: $backendForwardedLtp | App Received LTP: $ltp"
+        )
+
+        updateSymbolFromTick(token, symbol, ltp, change, changePercent, volume, timestamp)
+
+        // Emit live tick for indices, stocks, and charts
+        scope.launch {
+            _tickFlow.emit(
+                LiveTick(
+                    token = token,
+                    symbol = symbol,
+                    ltp = ltp,
+                    volume = volume,
+                    timestamp = timestamp
+                )
+            )
         }
     }
 

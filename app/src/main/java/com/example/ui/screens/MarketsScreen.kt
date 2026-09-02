@@ -244,7 +244,7 @@ fun MarketsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // Left: Index Info
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -253,7 +253,8 @@ fun MarketsScreen(
                                         text = idx.symbol,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
+                                        color = TextPrimary,
+                                        maxLines = 1
                                     )
                                     Surface(shape = RoundedCornerShape(3.dp), color = CyanAccentBg) {
                                         Text(
@@ -261,7 +262,8 @@ fun MarketsScreen(
                                             fontSize = 8.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = CyanAccent,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                            maxLines = 1
                                         )
                                     }
                                 }
@@ -269,7 +271,8 @@ fun MarketsScreen(
                                     text = idx.name,
                                     fontSize = 11.sp,
                                     color = TextTertiary,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Row(
@@ -286,7 +289,8 @@ fun MarketsScreen(
                                         text = "${idx.constituentCount} Constituent Stocks • Tap to view",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = CyanAccent
+                                        color = CyanAccent,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -294,7 +298,8 @@ fun MarketsScreen(
                             // Right: Price + Action Buttons
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.wrapContentWidth()
                             ) {
                                 Column(horizontalAlignment = Alignment.End) {
                                     val displayPrice = when {
@@ -399,20 +404,22 @@ fun MarketsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Left: Symbol & Company
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = stock.symbol,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
+                                    color = TextPrimary,
+                                    maxLines = 1
                                 )
                                 Surface(shape = RoundedCornerShape(3.dp), color = BgCardElevated) {
                                     Text(
                                         text = stock.exchange,
                                         fontSize = 8.sp,
                                         color = CyanAccent,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -420,7 +427,8 @@ fun MarketsScreen(
                                 text = stock.companyName,
                                 fontSize = 11.sp,
                                 color = TextTertiary,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             // Day High / Low range indicator
@@ -428,7 +436,7 @@ fun MarketsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text(text = "L: ₹${stock.dayLow}", fontSize = 9.sp, color = TextTertiary)
+                                Text(text = "L: ₹${stock.dayLow}", fontSize = 9.sp, color = TextTertiary, maxLines = 1)
                                 LinearProgressIndicator(
                                     progress = {
                                         val span = maxOf(0.1, stock.dayHigh - stock.dayLow)
@@ -441,14 +449,15 @@ fun MarketsScreen(
                                     color = if (isPos) BullishGreen else BearishRed,
                                     trackColor = BgCardBorder
                                 )
-                                Text(text = "H: ₹${stock.dayHigh}", fontSize = 9.sp, color = TextTertiary)
+                                Text(text = "H: ₹${stock.dayHigh}", fontSize = 9.sp, color = TextTertiary, maxLines = 1)
                             }
                         }
 
                         // Right: Price + Analyze Button + Watchlist Star
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.wrapContentWidth()
                         ) {
                             Column(horizontalAlignment = Alignment.End) {
                                 val displayPrice = when {

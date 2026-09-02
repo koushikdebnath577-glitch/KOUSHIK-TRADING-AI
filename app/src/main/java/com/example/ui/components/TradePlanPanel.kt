@@ -49,7 +49,11 @@ fun TradePlanPanel(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Default.ListAlt,
                         contentDescription = null,
@@ -61,7 +65,8 @@ fun TradePlanPanel(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent,
-                        letterSpacing = 0.8.sp
+                        letterSpacing = 0.8.sp,
+                        maxLines = 1
                     )
                 }
 
@@ -72,6 +77,7 @@ fun TradePlanPanel(
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier
                         .height(28.dp)
+                        .wrapContentWidth()
                         .testTag("save_trade_plan_button")
                 ) {
                     Icon(imageVector = Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(13.dp))
@@ -150,12 +156,18 @@ fun TradePlanPanel(
                 Spacer(modifier = Modifier.height(4.dp))
                 analysisResult.reasonsForSetup.take(3).forEach { reason ->
                     Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
                         verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(bottom = 2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(text = "•", color = BullishGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text(text = reason, fontSize = 11.sp, color = TextSecondary, lineHeight = 14.sp)
+                        Text(
+                            text = reason,
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            lineHeight = 15.sp,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
@@ -172,12 +184,18 @@ fun TradePlanPanel(
                 Spacer(modifier = Modifier.height(4.dp))
                 analysisResult.reasonsToAvoid.take(3).forEach { avoid ->
                     Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
                         verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(bottom = 2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(text = "•", color = BearishRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text(text = avoid, fontSize = 11.sp, color = TextSecondary, lineHeight = 14.sp)
+                        Text(
+                            text = avoid,
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            lineHeight = 15.sp,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
@@ -197,12 +215,18 @@ private fun PlanRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = "$label:", fontSize = 11.sp, color = TextTertiary)
+        Text(
+            text = "$label:",
+            fontSize = 11.sp,
+            color = TextTertiary,
+            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
+        )
         Text(
             text = value,
             fontSize = 11.sp,
             fontWeight = if (isBold) FontWeight.Bold else FontWeight.Medium,
-            color = valueColor
+            color = valueColor,
+            modifier = Modifier.wrapContentWidth()
         )
     }
 }

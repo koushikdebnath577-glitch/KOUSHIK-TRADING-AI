@@ -99,11 +99,12 @@ fun IndexDetailScreen(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f).padding(end = 6.dp)
                 ) {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.testTag("index_detail_back_button")
+                        modifier = Modifier.size(36.dp).testTag("index_detail_back_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -111,13 +112,14 @@ fun IndexDetailScreen(
                             tint = TextPrimary
                         )
                     }
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
                                 text = index.symbol,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1
                             )
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
@@ -128,7 +130,8 @@ fun IndexDetailScreen(
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = CyanAccent,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -136,14 +139,15 @@ fun IndexDetailScreen(
                             text = index.name,
                             fontSize = 11.sp,
                             color = TextTertiary,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
 
                 IconButton(
                     onClick = onRefresh,
-                    modifier = Modifier.testTag("index_detail_refresh_button")
+                    modifier = Modifier.size(36.dp).wrapContentWidth().testTag("index_detail_refresh_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
@@ -494,7 +498,7 @@ fun IndexDetailScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // Left: Stock info
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -503,7 +507,8 @@ fun IndexDetailScreen(
                                         text = stock.symbol,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
+                                        color = TextPrimary,
+                                        maxLines = 1
                                     )
                                     Surface(
                                         shape = RoundedCornerShape(3.dp),
@@ -513,7 +518,8 @@ fun IndexDetailScreen(
                                             text = stock.exchange,
                                             fontSize = 8.sp,
                                             color = CyanAccent,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                            maxLines = 1
                                         )
                                     }
                                 }
@@ -521,14 +527,15 @@ fun IndexDetailScreen(
                                     text = stock.companyName,
                                     fontSize = 11.sp,
                                     color = TextTertiary,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text(text = "L: ₹${stock.dayLow}", fontSize = 9.sp, color = TextTertiary)
+                                    Text(text = "L: ₹${stock.dayLow}", fontSize = 9.sp, color = TextTertiary, maxLines = 1)
                                     LinearProgressIndicator(
                                         progress = {
                                             val span = maxOf(0.1, stock.dayHigh - stock.dayLow)
@@ -541,14 +548,15 @@ fun IndexDetailScreen(
                                         color = if (isStockPos) BullishGreen else BearishRed,
                                         trackColor = BgCardBorder
                                     )
-                                    Text(text = "H: ₹${stock.dayHigh}", fontSize = 9.sp, color = TextTertiary)
+                                    Text(text = "H: ₹${stock.dayHigh}", fontSize = 9.sp, color = TextTertiary, maxLines = 1)
                                 }
                             }
 
                             // Right: Price & Quick Action Buttons
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.wrapContentWidth()
                             ) {
                                 Column(horizontalAlignment = Alignment.End) {
                                     val displayPrice = when {
@@ -570,14 +578,16 @@ fun IndexDetailScreen(
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace,
-                                            color = if (isLive) (if (isStockPos) BullishGreen else BearishRed) else TextPrimary
+                                            color = if (isLive) (if (isStockPos) BullishGreen else BearishRed) else TextPrimary,
+                                            maxLines = 1
                                         )
                                         if (isLive) {
                                             Text(
                                                 text = "${if (isStockPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                color = if (isStockPos) BullishGreen else BearishRed
+                                                color = if (isStockPos) BullishGreen else BearishRed,
+                                                maxLines = 1
                                             )
                                         } else {
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -585,13 +595,15 @@ fun IndexDetailScreen(
                                                     text = "$priceLabel • NOT LIVE",
                                                     fontSize = 8.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = KeyLevelYellow
+                                                    color = KeyLevelYellow,
+                                                    maxLines = 1
                                                 )
                                                 if (formattedTime.isNotEmpty()) {
                                                     Text(
                                                         text = "• $formattedTime",
                                                         fontSize = 8.sp,
-                                                        color = TextTertiary
+                                                        color = TextTertiary,
+                                                        maxLines = 1
                                                     )
                                                 }
                                             }
@@ -601,13 +613,15 @@ fun IndexDetailScreen(
                                             text = "Price unavailable",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = TextTertiary
+                                            color = TextTertiary,
+                                            maxLines = 1
                                         )
                                         Text(
                                             text = "LIVE DATA UNAVAILABLE",
                                             fontSize = 8.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = KeyLevelYellow
+                                            color = KeyLevelYellow,
+                                            maxLines = 1
                                         )
                                     }
                                 }
@@ -618,12 +632,12 @@ fun IndexDetailScreen(
                                     shape = RoundedCornerShape(6.dp),
                                     color = CyanAccentBg,
                                     border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
-                                    modifier = Modifier.testTag("analyze_stock_btn_${stock.symbol}")
+                                    modifier = Modifier.wrapContentWidth().testTag("analyze_stock_btn_${stock.symbol}")
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.ShowChart,
@@ -635,7 +649,8 @@ fun IndexDetailScreen(
                                             text = "Analyze",
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = CyanAccent
+                                            color = CyanAccent,
+                                            maxLines = 1
                                         )
                                     }
                                 }

@@ -74,18 +74,22 @@ fun WatchlistScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(
+                modifier = Modifier.weight(1f).padding(end = 6.dp)
+            ) {
                 Text(
                     text = "WATCHLIST & TRADE PLANS",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Black,
                     color = TextPrimary,
-                    letterSpacing = 0.5.sp
+                    letterSpacing = 0.5.sp,
+                    maxLines = 1
                 )
                 Text(
                     text = "Persisted local database storage for monitored setups",
                     fontSize = 11.sp,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    lineHeight = 14.sp
                 )
             }
 
@@ -98,11 +102,11 @@ fun WatchlistScreen(
                         contentColor = Color.Black
                     ),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    modifier = Modifier.height(34.dp).testTag("add_stock_watchlist_button")
+                    modifier = Modifier.height(34.dp).wrapContentWidth().testTag("add_stock_watchlist_button")
                 ) {
                     Icon(imageVector = Icons.Default.Add, contentDescription = "Add Stock", modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Add Stock", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text(text = "Add Stock", fontSize = 11.sp, fontWeight = FontWeight.Black, maxLines = 1)
                 }
             } else if (selectedTab == 2) {
                 IconButton(
@@ -327,17 +331,35 @@ private fun WatchlistContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = item.symbol, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = item.symbol, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1)
                             Surface(shape = RoundedCornerShape(3.dp), color = BgCardElevated) {
-                                Text(text = item.exchange, fontSize = 8.sp, color = CyanAccent, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                Text(
+                                    text = item.exchange,
+                                    fontSize = 8.sp,
+                                    color = CyanAccent,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                    maxLines = 1
+                                )
                             }
                         }
-                        Text(text = item.companyName, fontSize = 11.sp, color = TextTertiary, maxLines = 1)
+                        Text(
+                            text = item.companyName,
+                            fontSize = 11.sp,
+                            color = TextTertiary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.wrapContentWidth()
+                    ) {
                         Column(horizontalAlignment = Alignment.End) {
                             if (displayPrice > 0.0) {
                                 Text(
@@ -345,14 +367,16 @@ private fun WatchlistContent(
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary
+                                    color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary,
+                                    maxLines = 1
                                 )
                                 if (isLive) {
                                     Text(
                                         text = "${if (isPos) "+" else ""}${String.format(Locale.US, "%.2f", change)} (${if (isPos) "+" else ""}${String.format(Locale.US, "%.2f", changePercent)}%)",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = if (isPos) BullishGreen else BearishRed
+                                        color = if (isPos) BullishGreen else BearishRed,
+                                        maxLines = 1
                                     )
                                 } else {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -360,13 +384,15 @@ private fun WatchlistContent(
                                             text = "$priceLabel • NOT LIVE",
                                             fontSize = 8.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = KeyLevelYellow
+                                            color = KeyLevelYellow,
+                                            maxLines = 1
                                         )
                                         if (formattedTime.isNotEmpty()) {
                                             Text(
                                                 text = "• $formattedTime",
                                                 fontSize = 8.sp,
-                                                color = TextTertiary
+                                                color = TextTertiary,
+                                                maxLines = 1
                                             )
                                         }
                                     }
@@ -376,13 +402,15 @@ private fun WatchlistContent(
                                     text = "Price unavailable",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = TextTertiary
+                                    color = TextTertiary,
+                                    maxLines = 1
                                 )
                                 Text(
                                     text = "LIVE DATA UNAVAILABLE",
                                     fontSize = 8.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = KeyLevelYellow
+                                    color = KeyLevelYellow,
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -429,22 +457,27 @@ private fun SavedPlansContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = plan.symbol, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f).padding(end = 6.dp)
+                        ) {
+                            Text(text = plan.symbol, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1)
                             Surface(shape = RoundedCornerShape(4.dp), color = if (plan.direction == "SHORT") BearishRedBg else BullishGreenBg) {
                                 Text(
                                     text = "${plan.direction} • ${plan.strategyName}",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (plan.direction == "SHORT") BearishRed else BullishGreen,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                    maxLines = 1
                                 )
                             }
                         }
 
                         IconButton(
                             onClick = { onDeletePlan(plan.id) },
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(28.dp).wrapContentWidth()
                         ) {
                             Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "Delete", tint = TextTertiary)
                         }
@@ -458,23 +491,23 @@ private fun SavedPlansContent(
                             .clip(RoundedCornerShape(8.dp))
                             .background(BgCardElevated)
                             .padding(8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Column {
-                            Text(text = "Entry", fontSize = 9.sp, color = TextTertiary)
-                            Text(text = "₹${plan.entryPrice}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Entry", fontSize = 9.sp, color = TextTertiary, maxLines = 1)
+                            Text(text = "₹${plan.entryPrice}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyanAccent, maxLines = 1)
                         }
-                        Column {
-                            Text(text = "Stop Loss", fontSize = 9.sp, color = TextTertiary)
-                            Text(text = "₹${plan.stopLoss}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BearishRed)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Stop Loss", fontSize = 9.sp, color = TextTertiary, maxLines = 1)
+                            Text(text = "₹${plan.stopLoss}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BearishRed, maxLines = 1)
                         }
-                        Column {
-                            Text(text = "Target 1", fontSize = 9.sp, color = TextTertiary)
-                            Text(text = "₹${plan.target1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BullishGreen)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Target 1", fontSize = 9.sp, color = TextTertiary, maxLines = 1)
+                            Text(text = "₹${plan.target1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BullishGreen, maxLines = 1)
                         }
-                        Column {
-                            Text(text = "Score", fontSize = 9.sp, color = TextTertiary)
-                            Text(text = "${plan.score}/100", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = KeyLevelYellow)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Score", fontSize = 9.sp, color = TextTertiary, maxLines = 1)
+                            Text(text = "${plan.score}/100", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = KeyLevelYellow, maxLines = 1)
                         }
                     }
 
@@ -488,16 +521,18 @@ private fun SavedPlansContent(
                         Text(
                             text = "Saved: ${dateFormat.format(Date(plan.timestamp))}",
                             fontSize = 9.sp,
-                            color = TextTertiary
+                            color = TextTertiary,
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
+                            maxLines = 1
                         )
                         Button(
                             onClick = { onSelectStock(plan.symbol) },
                             shape = RoundedCornerShape(6.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.White),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.height(26.dp)
+                            modifier = Modifier.height(26.dp).wrapContentWidth()
                         ) {
-                            Text(text = "Load in Chart", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "Load in Chart", fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                     }
                 }

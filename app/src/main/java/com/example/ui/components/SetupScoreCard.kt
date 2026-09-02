@@ -61,7 +61,11 @@ fun SetupScoreCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp)
+                ) {
                     Box(
                         modifier = Modifier
                             .size(8.dp)
@@ -73,21 +77,24 @@ fun SetupScoreCard(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent,
-                        letterSpacing = 0.8.sp
+                        letterSpacing = 0.8.sp,
+                        maxLines = 1
                     )
                 }
 
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = gradeBg,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, gradeColor.copy(alpha = 0.35f))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, gradeColor.copy(alpha = 0.35f)),
+                    modifier = Modifier.wrapContentWidth()
                 ) {
                     Text(
                         text = grade.label,
                         color = gradeColor,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        maxLines = 1
                     )
                 }
             }

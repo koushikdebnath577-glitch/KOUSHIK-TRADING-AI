@@ -83,27 +83,30 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "KOUSHIK TRADING AI",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Black,
-                            color = TextPrimary,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
+                Column(
+                    modifier = Modifier.weight(1f).padding(end = 6.dp)
+                ) {
+                    Text(
+                        text = "KOUSHIK TRADING AI",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
+                        color = TextPrimary,
+                        letterSpacing = 0.8.sp,
+                        maxLines = 1
+                    )
                     Text(
                         text = "Intraday Market Structure & Precision Strategy Terminal",
                         fontSize = 11.sp,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        lineHeight = 14.sp
                     )
                 }
 
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = headerStatusColor.copy(alpha = 0.12f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, headerStatusColor.copy(alpha = 0.4f))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, headerStatusColor.copy(alpha = 0.4f)),
+                    modifier = Modifier.wrapContentWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -115,7 +118,8 @@ fun HomeScreen(
                             text = if (isLive) "NSE LIVE" else connectionStatus.label,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = headerStatusColor
+                            color = headerStatusColor,
+                            maxLines = 1
                         )
                     }
                 }
@@ -144,7 +148,8 @@ fun HomeScreen(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f).padding(end = 6.dp)
                     ) {
                         Box(
                             modifier = Modifier
@@ -164,13 +169,15 @@ fun HomeScreen(
                             Text(
                                 text = "Intraday Risk per Trade",
                                 fontSize = 10.sp,
-                                color = TextSecondary
+                                color = TextSecondary,
+                                maxLines = 1
                             )
                             Text(
                                 text = "₹${if (defaultRiskAmount % 1.0 == 0.0) defaultRiskAmount.toInt() else String.format(java.util.Locale.US, "%.2f", defaultRiskAmount)}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1
                             )
                         }
                     }
@@ -180,7 +187,7 @@ fun HomeScreen(
                         shape = RoundedCornerShape(6.dp),
                         color = CyanAccentBg,
                         border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
-                        modifier = Modifier.testTag("home_edit_risk_button")
+                        modifier = Modifier.wrapContentWidth().testTag("home_edit_risk_button")
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -197,7 +204,8 @@ fun HomeScreen(
                                 text = "Edit",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = CyanAccent
+                                color = CyanAccent,
+                                maxLines = 1
                             )
                         }
                     }
@@ -394,7 +402,7 @@ private fun IndexCard(
         colors = CardDefaults.cardColors(containerColor = BgCard),
         border = androidx.compose.foundation.BorderStroke(1.dp, BgCardBorder),
         modifier = Modifier
-            .width(160.dp)
+            .width(175.dp)
             .testTag("index_card_${index.symbol}")
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -409,7 +417,7 @@ private fun IndexCard(
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
                     maxLines = 1,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).padding(end = 4.dp)
                 )
                 Surface(
                     shape = RoundedCornerShape(3.dp),
@@ -420,20 +428,24 @@ private fun IndexCard(
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent,
-                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp),
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             if (displayPrice > 0.0) {
                 Text(
                     text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary
+                    color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary,
+                    maxLines = 1,
+                    softWrap = false
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -444,20 +456,26 @@ private fun IndexCard(
                             text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", index.changePercent)}%",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (isPos) BullishGreen else BearishRed
+                            color = if (isPos) BullishGreen else BearishRed,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     } else {
                         Text(
                             text = "$priceLabel • NOT LIVE",
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
-                            color = KeyLevelYellow
+                            color = KeyLevelYellow,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                     Text(
                         text = index.category,
                         fontSize = 8.sp,
-                        color = TextTertiary
+                        color = TextTertiary,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             } else {
@@ -465,14 +483,18 @@ private fun IndexCard(
                     text = "Price unavailable",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextTertiary
+                    color = TextTertiary,
+                    maxLines = 1,
+                    softWrap = false
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "LIVE DATA UNAVAILABLE",
                     fontSize = 8.sp,
                     fontWeight = FontWeight.Bold,
-                    color = KeyLevelYellow
+                    color = KeyLevelYellow,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }
@@ -557,31 +579,46 @@ fun StockItemCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(
+                modifier = Modifier.weight(1f).padding(end = 8.dp)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(text = stock.symbol, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = stock.symbol, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1)
                     Surface(shape = RoundedCornerShape(3.dp), color = BgCardElevated) {
                         Text(text = stock.exchange, fontSize = 8.sp, color = CyanAccent, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
                     }
                 }
-                Text(text = stock.companyName, fontSize = 11.sp, color = TextTertiary, maxLines = 1)
+                Text(
+                    text = stock.companyName,
+                    fontSize = 11.sp,
+                    color = TextTertiary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
             }
 
-            Column(horizontalAlignment = Alignment.End) {
+            Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier.wrapContentWidth()
+            ) {
                 if (displayPrice > 0.0) {
                     Text(
                         text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary
+                        color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary,
+                        maxLines = 1,
+                        softWrap = false
                     )
                     if (isLive) {
                         Text(
                             text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.change)} (${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = if (isPos) BullishGreen else BearishRed
+                            color = if (isPos) BullishGreen else BearishRed,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -589,13 +626,17 @@ fun StockItemCard(
                                 text = "$priceLabel • NOT LIVE",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = KeyLevelYellow
+                                color = KeyLevelYellow,
+                                maxLines = 1,
+                                softWrap = false
                             )
                             if (formattedTime.isNotEmpty()) {
                                 Text(
                                     text = "• $formattedTime",
                                     fontSize = 8.sp,
-                                    color = TextTertiary
+                                    color = TextTertiary,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -605,13 +646,17 @@ fun StockItemCard(
                         text = "Price unavailable",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextTertiary
+                        color = TextTertiary,
+                        maxLines = 1,
+                        softWrap = false
                     )
                     Text(
                         text = "LIVE DATA UNAVAILABLE",
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold,
-                        color = KeyLevelYellow
+                        color = KeyLevelYellow,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
