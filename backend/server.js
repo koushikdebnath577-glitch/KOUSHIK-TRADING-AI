@@ -117,7 +117,7 @@ class SmartApiAuthManager {
     try {
       // 1. Generate current TOTP code using Base32 secret
       const totpCode = authenticator.generate(ANGEL_TOTP_SECRET.trim());
-      console.log('[SmartAPI Auth] Initiating Angel One login with TOTP...');
+      console.log(`[ANGEL WS AUTH] Initiating Angel One login with TOTP for client: ${ANGEL_CLIENT_ID.trim()}...`);
 
       // 2. Call loginByPassword endpoint
       const response = await axios.post(
@@ -150,7 +150,7 @@ class SmartApiAuthManager {
         this.lastLoginTime = new Date().toISOString();
         this.isAuthenticated = true;
         this.lastError = null;
-        console.log('[SmartAPI Auth] Login SUCCESSFUL. Session active.');
+        console.log(`[ANGEL WS AUTH] Login SUCCESSFUL. Session active. feedToken length: ${this.feedToken ? this.feedToken.length : 0}`);
 
         // Schedule token refresh in 6 hours
         this.scheduleTokenRefresh();
@@ -159,14 +159,14 @@ class SmartApiAuthManager {
         const errorMsg = response.data?.message || 'Login failed with unknown SmartAPI error';
         this.lastError = errorMsg;
         this.isAuthenticated = false;
-        console.error(`[SmartAPI Auth] Login Failed: ${errorMsg}`);
+        console.error(`[ANGEL WS AUTH] Login Failed: ${errorMsg}`);
         return false;
       }
     } catch (err) {
       const errorMsg = err.response?.data?.message || err.message;
       this.lastError = errorMsg;
       this.isAuthenticated = false;
-      console.error(`[SmartAPI Auth] Authentication Exception: ${errorMsg}`);
+      console.error(`[ANGEL WS AUTH] Authentication Exception: ${errorMsg}`);
       return false;
     } finally {
       this.isAuthenticating = false;
@@ -356,28 +356,54 @@ class UpstreamMarketFeed {
 
   connect() {
     if (!isAngelConfigured() || !authManager.isAuthenticated) {
-      this.startSimulationFeed();
+      console.warn('[ANGEL WS CONNECT] Cannot connect: Angel One credentials missing or not authenticated.');
       return;
     }
 
-    this.stopSimulationFeed();
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
 
     try {
-      const rawAuthToken = authManager.jwtToken ? authManager.jwtToken.replace(/^Bearer\s+/i, '').trim() : '';
+      const rawJwt = authManager.jwtToken ? authManager.jwtToken.replace(/^Bearer\s+/i, '').trim() : '';
+      const bearerToken = `Bearer ${rawJwt}`;
       console.log(`[ANGEL WS CONNECT] Connecting to Angel One Live WebSocket: ${SMARTSTREAM_WS_URL}`);
+      console.log(`[ANGEL WS AUTH] Client: ${ANGEL_CLIENT_ID.trim()} | feedToken: ${authManager.feedToken ? 'PRESENT' : 'MISSING'} | JWT: ${rawJwt ? 'PRESENT' : 'MISSING'}`);
+
+      if (this.ws) {
+        try {
+          this.ws.removeAllListeners();
+          this.ws.terminate();
+        } catch (e) {}
+        this.ws = null;
+      }
+
       this.ws = new WebSocket(SMARTSTREAM_WS_URL, {
         headers: {
-          'Authorization': rawAuthToken,
+          'Authorization': bearerToken,
           'x-api-key': ANGEL_API_KEY.trim(),
           'x-client-code': ANGEL_CLIENT_ID.trim(),
           'x-feed-token': authManager.feedToken
         }
       });
 
+      if (this.pingInterval) {
+        clearInterval(this.pingInterval);
+        this.pingInterval = null;
+      }
+
       this.ws.on('open', () => {
         console.log('[ANGEL WS CONNECT] Connected to Angel One Market Feed successfully.');
         this.isConnected = true;
         this.resubscribeAll();
+
+        // 10-second heartbeat ping mandated by SmartStream WebSocket server
+        this.pingInterval = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send('ping');
+          }
+        }, 10000);
       });
 
       this.ws.on('message', (data) => {
@@ -385,6 +411,10 @@ class UpstreamMarketFeed {
       });
 
       this.ws.on('close', (code, reason) => {
+        if (this.pingInterval) {
+          clearInterval(this.pingInterval);
+          this.pingInterval = null;
+        }
         console.warn(`[ANGEL WS CONNECT] Disconnected (${code}: ${reason}). Reconnecting in 3s...`);
         this.isConnected = false;
         this.scheduleReconnect();
@@ -395,7 +425,7 @@ class UpstreamMarketFeed {
       });
     } catch (err) {
       console.error(`[ANGEL WS CONNECT] Connection exception: ${err.message}`);
-      this.startSimulationFeed();
+      this.scheduleReconnect();
     }
   }
 
@@ -500,23 +530,26 @@ class UpstreamMarketFeed {
         }
 
         let ltp = 0;
-        if (data.length >= 51) {
-          const ltpPaise = Number(data.readBigInt64LE ? data.readBigInt64LE(43) : data.readInt32LE(43));
+        if (data.length >= 47) {
+          // In mode 1 (LTP), last_traded_price is a 32-bit int LE in paise at byte offset 43
+          const ltpPaise = data.readInt32LE(43);
           ltp = ltpPaise / 100.0;
         } else if (data.length >= 8) {
           ltp = data.readInt32LE(4) / 100.0;
         }
 
-        parsedTick = {
-          token,
-          ltp,
-          angelOneLtp: ltp,
-          backendForwardedLtp: ltp,
-          volume: 0,
-          timestamp: exchangeTimestamp
-        };
+        if (token && ltp > 0) {
+          parsedTick = {
+            token,
+            ltp,
+            angelOneLtp: ltp,
+            backendForwardedLtp: ltp,
+            volume: 0,
+            timestamp: exchangeTimestamp
+          };
 
-        console.log(`[ANGEL WS RAW TICK] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
+          console.log(`[ANGEL RAW TICK] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
+        }
       }
 
       if (parsedTick && parsedTick.token && parsedTick.ltp > 0) {

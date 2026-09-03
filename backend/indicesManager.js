@@ -556,7 +556,6 @@ class IndicesManager {
   initialize(scripMaster) {
     console.log(`[IndicesManager] Initializing ${this.indices.length} supported NSE indices...`);
     this.enrichWithScripMaster(scripMaster);
-    this.updateLiveSimulatedPrices();
     this.scheduleAutoRefresh();
   }
 
