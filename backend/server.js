@@ -85,6 +85,23 @@ STOCK_DIRECTORY.forEach(item => {
   tokenMap.set(item.symbol, item);
 });
 
+// Also register supported indices in tokenMap
+indicesManager.getAllIndices().forEach(idx => {
+  const indexItem = {
+    symbol: idx.symbol,
+    name: idx.name,
+    token: idx.token,
+    exchange: 'NSE',
+    ltp: 0.0,
+    prevClose: 0.0
+  };
+  tokenMap.set(idx.token, indexItem);
+  tokenMap.set(idx.symbol, indexItem);
+  if (idx.alias) {
+    tokenMap.set(idx.alias, indexItem);
+  }
+});
+
 // ------------------------------------------------------------------------------
 // 3. ANGEL ONE SMARTAPI AUTHENTICATION MANAGER
 // ------------------------------------------------------------------------------
@@ -698,7 +715,14 @@ function broadcastToClients(payload, token = null) {
 
 function handleClientWebSocket(ws, req) {
   clientSockets.add(ws);
-  clientSubscriptions.set(ws, new Set(['3045', '2885', '1333', '11536', '1594', '99926000', '99926009']));
+  const initialSubs = new Set([
+    '3045', '2885', '1333', '11536', '1594', '4963', '3456', '1660', '10604', '11483',
+    '99926000', '99926009', '99926037', '99926008', '99926029', '99926021', '99926023',
+    '99926030', '99926018', '99926031', '99926020', '99926019', '99926038', '99926025',
+    '99926047', '99926040', '99926014', '99926011', '99926032', '99926012', '99926033',
+    '99926004', '99926013'
+  ]);
+  clientSubscriptions.set(ws, initialSubs);
 
   console.log(`[Client WS] New Android client connected. Total clients: ${clientSockets.size}`);
 

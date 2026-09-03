@@ -214,13 +214,26 @@ class TradingRepository(
             "BANKNIFTY", "NIFTY BANK", "NIFTYBANK" -> "99926009"
             "FINNIFTY", "NIFTY FINANCIAL SERVICES", "NIFTY FIN SERVICE" -> "99926037"
             "MIDCPNIFTY", "NIFTY MIDCAP SELECT" -> "99926074"
-            "NIFTY NEXT 50", "NIFTYNXT50" -> "99926004"
+            "NIFTY NEXT 50", "NIFTYNXT50" -> "99926013"
             "NIFTY IT" -> "99926008"
-            "NIFTY AUTO" -> "99926001"
-            "NIFTY PHARMA" -> "99926011"
-            "NIFTY FMCG" -> "99926005"
-            "NIFTY METAL" -> "99926007"
-            "NIFTY ENERGY" -> "99926003"
+            "NIFTY AUTO" -> "99926029"
+            "NIFTY PHARMA" -> "99926023"
+            "NIFTY FMCG" -> "99926021"
+            "NIFTY METAL" -> "99926030"
+            "NIFTY REALTY" -> "99926018"
+            "NIFTY MEDIA" -> "99926031"
+            "NIFTY ENERGY" -> "99926020"
+            "NIFTY INFRA" -> "99926019"
+            "NIFTY HEALTHCARE" -> "99926038"
+            "NIFTY PSU BANK" -> "99926025"
+            "NIFTY PRIVATE BANK" -> "99926047"
+            "NIFTY CONSUMER DURABLES" -> "99926040"
+            "NIFTY MIDCAP 50" -> "99926014"
+            "NIFTY MIDCAP 100" -> "99926011"
+            "NIFTY SMALLCAP 100" -> "99926032"
+            "NIFTY 100" -> "99926012"
+            "NIFTY 200" -> "99926033"
+            "NIFTY 500" -> "99926004"
             "RELIANCE" -> "2885"
             "HDFCBANK" -> "1333"
             "TCS" -> "11536"
@@ -328,11 +341,17 @@ class TradingRepository(
         }
 
         // 2. Check if this tick matches the currently selected chart symbol
-        val isSelected = tick.symbol.equals(_selectedSymbol.value, ignoreCase = true) ||
+        val selectedToken = resolveInstrumentInfo(_selectedSymbol.value).first
+        val isSelected = tick.token == selectedToken ||
+            tick.symbol.equals(_selectedSymbol.value, ignoreCase = true) ||
             (tick.token == "99926000" && (_selectedSymbol.value == "NIFTY 50" || _selectedSymbol.value == "NIFTY")) ||
             (tick.token == "99926009" && _selectedSymbol.value in listOf("BANKNIFTY", "NIFTY BANK")) ||
             (tick.token == "99926037" && _selectedSymbol.value in listOf("FINNIFTY", "NIFTY FINANCIAL SERVICES")) ||
-            marketSymbols.value.find { it.token == tick.token }?.symbol.equals(_selectedSymbol.value, ignoreCase = true)
+            marketSymbols.value.find { it.token == tick.token }?.symbol.equals(_selectedSymbol.value, ignoreCase = true) ||
+            _indices.value.find { it.token == tick.token }?.let {
+                it.symbol.equals(_selectedSymbol.value, ignoreCase = true) ||
+                (it.alias != null && it.alias.equals(_selectedSymbol.value, ignoreCase = true))
+            } == true
 
         if (isSelected) {
             var agg = aggregator
