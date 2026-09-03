@@ -191,7 +191,9 @@ fun AnalyzeScreen(
                 indicatorSettings = indicatorSettings,
                 selectedTimeframe = selectedTimeframe,
                 onTimeframeSelected = onTimeframeSelected,
-                onToggleIndicator = onToggleIndicator
+                onToggleIndicator = onToggleIndicator,
+                connectionStatus = connectionStatus,
+                lastUpdatedTimestamp = lastUpdated
             )
         }
 

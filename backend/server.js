@@ -469,20 +469,44 @@ class UpstreamMarketFeed {
   }
 
   subscribeToken(token) {
-    this.subscribedTokens.add(token);
-    console.log(`[ANGEL WS SUBSCRIBE] Token added: ${token}`);
+    const tokenStr = String(token).trim();
+    if (!tokenStr) return;
+    this.subscribedTokens.add(tokenStr);
+    console.log(`[ANGEL WS SUBSCRIBE] Dynamic Token added: ${tokenStr}`);
+
+    if (!tokenMap.has(tokenStr)) {
+      const scrip = scripMasterManager.getByToken(tokenStr);
+      if (scrip) {
+        const cleanSym = scrip.symbol.replace(/-EQ$/i, '');
+        const stockInfo = {
+          symbol: cleanSym,
+          name: scrip.name,
+          token: tokenStr,
+          exchange: scrip.exchange || 'NSE',
+          ltp: 0.0,
+          prevClose: 0.0
+        };
+        tokenMap.set(tokenStr, stockInfo);
+        tokenMap.set(cleanSym, stockInfo);
+        tokenMap.set(scrip.symbol, stockInfo);
+        console.log(`[TokenMap] Registered dynamic scrip from master: ${cleanSym} (${tokenStr})`);
+      }
+    }
+
     if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN) {
       const payload = {
-        correlationID: `koushik_sub_${token}`,
+        correlationID: `koushik_sub_${tokenStr}`,
         action: 1,
         params: {
           mode: 1,
-          tokenList: [{ exchangeType: 1, tokens: [token] }]
+          tokenList: [{ exchangeType: 1, tokens: [tokenStr] }]
         }
       };
       this.ws.send(JSON.stringify(payload));
-      console.log(`[ANGEL WS SUBSCRIBE] Sent subscribe request for token: ${token}`);
+      console.log(`[ANGEL WS SUBSCRIBE] Sent subscribe request for dynamic token: ${tokenStr} to Angel One SmartStream`);
     }
+
+    fetchAndBroadcastSingleQuote(tokenStr);
   }
 
   unsubscribeToken(token) {
@@ -581,7 +605,26 @@ class UpstreamMarketFeed {
   }
 
   broadcastTick(token, ltp, volume, angelOneLtp = ltp, backendForwardedLtp = ltp, exchangeTimestamp = Date.now()) {
-    const stockInfo = tokenMap.get(token) || { symbol: `TOKEN_${token}`, exchange: 'NSE', prevClose: ltp };
+    let stockInfo = tokenMap.get(token);
+    if (!stockInfo) {
+      const scrip = scripMasterManager.getByToken(token);
+      if (scrip) {
+        const cleanSym = scrip.symbol.replace(/-EQ$/i, '');
+        stockInfo = {
+          symbol: cleanSym,
+          name: scrip.name,
+          token: String(token),
+          exchange: scrip.exchange || 'NSE',
+          ltp: ltp,
+          prevClose: ltp
+        };
+        tokenMap.set(token, stockInfo);
+        tokenMap.set(cleanSym, stockInfo);
+        tokenMap.set(scrip.symbol, stockInfo);
+      } else {
+        stockInfo = { symbol: `TOKEN_${token}`, exchange: 'NSE', prevClose: ltp };
+      }
+    }
     stockInfo.ltp = ltp;
     const change = stockInfo.prevClose > 0 ? Math.round((ltp - stockInfo.prevClose) * 100) / 100 : 0.0;
     const changePercent = stockInfo.prevClose > 0 ? Math.round((change / stockInfo.prevClose) * 10000) / 100 : 0.0;
@@ -645,6 +688,46 @@ class UpstreamMarketFeed {
         authManager.login().then(() => this.connect());
       }
     }, 3000);
+  }
+}
+
+// Instant single quote fetcher for dynamic stock/index subscription
+async function fetchAndBroadcastSingleQuote(token) {
+  if (!isAngelConfigured() || !authManager.isAuthenticated) return;
+  try {
+    const tokenStr = String(token).trim();
+    if (!tokenStr) return;
+    const response = await axios.post(
+      `${SMARTAPI_BASE_URL}/rest/secure/angelbroking/market/v1/quote/`,
+      {
+        mode: 'FULL',
+        exchangeTokens: {
+          NSE: [tokenStr]
+        }
+      },
+      {
+        headers: authManager.getHeaders(),
+        timeout: 4000
+      }
+    );
+    if (response.data && response.data.status && response.data.data && response.data.data.fetched) {
+      const item = response.data.data.fetched[0];
+      if (item && item.token) {
+        const ltp = Number(item.ltp || item.lastPrice || 0);
+        const change = Number(item.netChange || item.change || 0);
+        const changePercent = Number(item.percentChange || item.changePercent || 0);
+        const high = Number(item.high || ltp);
+        const low = Number(item.low || ltp);
+        const prevClose = Number(item.close || (ltp - change));
+        if (ltp > 0) {
+          console.log(`[Dynamic Quote Instant] Token: ${tokenStr} | Symbol: ${item.tradingSymbol} | LTP: ${ltp}`);
+          upstreamMarketFeed.broadcastTick(tokenStr, ltp, 0, ltp, ltp);
+          indicesManager.updateIndexFromTick(tokenStr, ltp, change, changePercent, high, low, prevClose);
+        }
+      }
+    }
+  } catch (err) {
+    // Non-blocking quote fetch failure
   }
 }
 
@@ -742,15 +825,24 @@ function handleClientWebSocket(ws, req) {
       const action = data.action || data.type;
 
       switch (action) {
-        case 'subscribe': {
-          const tokens = data.tokens || (data.token ? [data.token] : []);
+        case 'subscribe':
+        case 1: {
+          let rawTokens = data.tokens;
+          if (!rawTokens && data.token) {
+            rawTokens = [data.token];
+          }
+          if (!Array.isArray(rawTokens)) {
+            rawTokens = rawTokens ? [rawTokens] : [];
+          }
+          const tokens = rawTokens.map(t => String(t).trim()).filter(Boolean);
           const subs = clientSubscriptions.get(ws) || new Set();
           tokens.forEach(t => {
-            subs.add(String(t));
-            upstreamMarketFeed.subscribeToken(String(t));
+            subs.add(t);
+            upstreamMarketFeed.subscribeToken(t);
           });
           clientSubscriptions.set(ws, subs);
           ws.send(JSON.stringify({ type: 'subscribed', tokens: Array.from(subs) }));
+          console.log(`[Client WS Dynamic Subscribe] Subscribed tokens: ${tokens.join(', ')} | Total active subs for client: ${subs.size}`);
           break;
         }
 

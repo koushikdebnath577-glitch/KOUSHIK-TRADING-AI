@@ -61,6 +61,9 @@ class TradingRepository(
 
     init {
         // Initial setup for default symbol
+        val (initToken, initExchange) = resolveInstrumentInfo(_selectedSymbol.value)
+        smartApiClient.registerScrip(_selectedSymbol.value, initToken, initExchange)
+        smartApiClient.subscribeToken(initToken)
         loadCandlesForSelected()
 
         // Fetch latest live indices from backend
@@ -145,8 +148,12 @@ class TradingRepository(
     )
 
     fun selectSymbol(symbol: String) {
-        if (_selectedSymbol.value == symbol) return
-        _selectedSymbol.value = symbol
+        val trimmed = symbol.trim()
+        _selectedSymbol.value = trimmed
+        val (token, exchange) = resolveInstrumentInfo(trimmed)
+        android.util.Log.i("DYNAMIC_TOKEN_SUB", "[DYNAMIC_TOKEN_SUB] Selected symbol: $trimmed -> Dynamically subscribing token $token ($exchange) on WebSocket")
+        smartApiClient.registerScrip(trimmed, token, exchange)
+        smartApiClient.subscribeToken(token)
         loadCandlesForSelected()
     }
 
@@ -216,7 +223,7 @@ class TradingRepository(
             "MIDCPNIFTY", "NIFTY MIDCAP SELECT" -> "99926074"
             "NIFTY NEXT 50", "NIFTYNXT50" -> "99926013"
             "NIFTY IT" -> "99926008"
-            "NIFTY AUTO" -> "99926029"
+            "NIFTY AUTO" -> "99926002"
             "NIFTY PHARMA" -> "99926023"
             "NIFTY FMCG" -> "99926021"
             "NIFTY METAL" -> "99926030"
@@ -237,6 +244,7 @@ class TradingRepository(
             "RELIANCE" -> "2885"
             "HDFCBANK" -> "1333"
             "TCS" -> "11536"
+            "HINDUNILVR", "HUL" -> "1394"
             "INFY" -> "1594"
             "ICICIBANK" -> "4963"
             "TATAMOTORS" -> "3456"
@@ -244,6 +252,9 @@ class TradingRepository(
             "ITC" -> "1660"
             "BHARTIARTL" -> "10604"
             "LT" -> "11483"
+            "KOTAKBANK" -> "1922"
+            "AXISBANK" -> "5900"
+            "BAJFINANCE" -> "317"
             else -> "99926000"
         }
         return Pair(token, "NSE")
@@ -347,6 +358,9 @@ class TradingRepository(
             (tick.token == "99926000" && (_selectedSymbol.value == "NIFTY 50" || _selectedSymbol.value == "NIFTY")) ||
             (tick.token == "99926009" && _selectedSymbol.value in listOf("BANKNIFTY", "NIFTY BANK")) ||
             (tick.token == "99926037" && _selectedSymbol.value in listOf("FINNIFTY", "NIFTY FINANCIAL SERVICES")) ||
+            (tick.token in listOf("99926002", "99926029") && _selectedSymbol.value == "NIFTY AUTO") ||
+            (tick.token == "99926008" && _selectedSymbol.value == "NIFTY IT") ||
+            (tick.token == "1394" && (_selectedSymbol.value.equals("HINDUNILVR", ignoreCase = true) || _selectedSymbol.value.equals("HUL", ignoreCase = true))) ||
             marketSymbols.value.find { it.token == tick.token }?.symbol.equals(_selectedSymbol.value, ignoreCase = true) ||
             _indices.value.find { it.token == tick.token }?.let {
                 it.symbol.equals(_selectedSymbol.value, ignoreCase = true) ||
@@ -354,6 +368,9 @@ class TradingRepository(
             } == true
 
         if (isSelected) {
+            // Instantly toggle live state to true, which removes the 'NOT LIVE' badge on the chart!
+            smartApiClient.markLive()
+
             var agg = aggregator
             if (agg == null) {
                 val initialCandles = if (_activeCandles.value.isNotEmpty()) {
@@ -380,8 +397,8 @@ class TradingRepository(
             android.util.Log.i("CHART_DATA", "[CHART_DATA] Tick updated chart for ${_selectedSymbol.value} (Token: ${tick.token}) - LTP: ${tick.ltp} Total Candles: ${agg.candles.size}")
 
             // Refresh key levels and analysis
-            val stock = marketSymbols.value.find { it.symbol == _selectedSymbol.value }
-            val prevClose = stock?.previousClose ?: tick.ltp
+            val stock = marketSymbols.value.find { it.symbol.equals(_selectedSymbol.value, ignoreCase = true) }
+            val prevClose = stock?.previousClose ?: getPrevCloseForInstrument(_selectedSymbol.value) ?: tick.ltp
             _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, tick.ltp, prevClose)
 
             recomputeAnalysis()
@@ -393,9 +410,9 @@ class TradingRepository(
         val candles = _activeCandles.value
         if (candles.isEmpty()) return
 
-        val stock = marketSymbols.value.find { it.symbol == symbol }
-        val ltp = stock?.ltp ?: candles.last().close
-        val prevClose = stock?.previousClose ?: ltp
+        val stock = marketSymbols.value.find { it.symbol.equals(symbol, ignoreCase = true) }
+        val ltp = stock?.ltp ?: getLtpForInstrument(symbol) ?: candles.last().close
+        val prevClose = stock?.previousClose ?: getPrevCloseForInstrument(symbol) ?: ltp
         val isLive = smartApiClient.connectionStatus.value == ConnectionStatus.LIVE
 
         val result = TradingAnalysisEngine.performFullAnalysis(

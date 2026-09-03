@@ -93,6 +93,57 @@ class SmartApiBackendClient {
     // In-memory cache of candle history per symbol + timeframe
     private val candleCache = mutableMapOf<String, MutableList<Candle>>()
 
+    private val dynamicSubscribedTokens = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val dynamicScripRegistry = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
+    private val dynamicTokenToSymbol = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    fun markLive() {
+        lastTickReceivedAt = System.currentTimeMillis()
+        _connectionStatus.value = ConnectionStatus.LIVE
+    }
+
+    fun registerScrip(symbol: String, token: String, exchange: String = "NSE", name: String = "") {
+        if (token.isBlank()) return
+        val clean = symbol.removeSuffix("-EQ").trim().uppercase()
+        val raw = symbol.trim().uppercase()
+        dynamicScripRegistry[clean] = Pair(token, exchange)
+        dynamicScripRegistry[raw] = Pair(token, exchange)
+        dynamicTokenToSymbol[token] = clean
+    }
+
+    fun subscribeToken(token: String) {
+        if (token.isBlank()) return
+        subscribeTokens(listOf(token))
+    }
+
+    fun subscribeTokens(tokens: List<String>) {
+        val cleanTokens = tokens.map { it.trim() }.filter { it.isNotEmpty() }
+        if (cleanTokens.isEmpty()) return
+
+        cleanTokens.forEach { dynamicSubscribedTokens.add(it) }
+
+        val tokensJson = JSONArray()
+        cleanTokens.forEach { tokensJson.put(it) }
+
+        // Send exact payload: {"action": "subscribe", "tokens": [selectedToken]}
+        val subPayload = JSONObject().apply {
+            put("action", "subscribe")
+            put("tokens", tokensJson)
+        }
+        val payloadStr = subPayload.toString()
+
+        val ws = webSocket
+        val sent = ws?.send(payloadStr) ?: false
+        Log.i("DYNAMIC_SUBSCRIBE", "[DYNAMIC_SUBSCRIBE] Sent WebSocket subscribe payload: $payloadStr | success: $sent")
+
+        // Also fetch quote via REST immediately
+        scope.launch {
+            cleanTokens.forEach { t ->
+                fetchQuote(t)
+            }
+        }
+    }
+
     init {
         initializeSymbols()
         startConnectionLifecycle()
@@ -263,6 +314,7 @@ class SmartApiBackendClient {
                     allTokens.add("99926037") // FINNIFTY explicitly
                     IndicesDataProvider.DEFAULT_INDICES.forEach { if (it.token.isNotEmpty()) allTokens.add(it.token) }
                     _marketSymbols.value.forEach { if (it.token.isNotEmpty()) allTokens.add(it.token) }
+                    allTokens.addAll(dynamicSubscribedTokens)
 
                     val tokensJson = JSONArray()
                     allTokens.forEach { tokensJson.put(it) }
@@ -530,6 +582,11 @@ class SmartApiBackendClient {
         if (token == "99926000" || token == "26000") return "NIFTY 50"
         if (token == "99926009" || token == "26009") return "BANKNIFTY"
         if (token == "99926037" || token == "26037") return "FINNIFTY"
+        if (token == "99926008") return "NIFTY IT"
+        if (token == "99926002") return "NIFTY AUTO"
+        if (token == "1394") return "HINDUNILVR"
+        val dynamic = dynamicTokenToSymbol[token]
+        if (dynamic != null) return dynamic
         val idx = IndicesDataProvider.DEFAULT_INDICES.find { it.token == token }
         if (idx != null) return idx.symbol
         val stock = _marketSymbols.value.find { it.token == token }
@@ -593,7 +650,7 @@ class SmartApiBackendClient {
         timestamp: Long
     ) {
         val currentList = _marketSymbols.value.toMutableList()
-        val index = currentList.indexOfFirst { it.token == token || it.symbol == symbol }
+        val index = currentList.indexOfFirst { it.token == token || it.symbol.equals(symbol, ignoreCase = true) }
 
         if (index >= 0) {
             val stock = currentList[index]
@@ -620,6 +677,39 @@ class SmartApiBackendClient {
                     LiveTick(
                         token = token,
                         symbol = stock.symbol,
+                        ltp = ltp,
+                        volume = volume,
+                        timestamp = timestamp
+                    )
+                )
+            }
+        } else if (symbol.isNotBlank() && !symbol.startsWith("TOKEN_")) {
+            val cleanSym = symbol.removeSuffix("-EQ")
+            val prevClose = if (change != 0.0) (ltp - change) else ltp
+            val newStock = StockSymbol(
+                symbol = cleanSym,
+                name = dynamicTokenToSymbol[token] ?: cleanSym,
+                token = token,
+                exchange = "NSE",
+                ltp = ltp,
+                change = kotlin.math.round(change * 100.0) / 100.0,
+                changePercent = kotlin.math.round(changePercent * 100.0) / 100.0,
+                open = prevClose,
+                high = ltp,
+                low = ltp,
+                close = ltp,
+                volume = volume,
+                previousClose = prevClose,
+                lastUpdated = timestamp
+            )
+            currentList.add(newStock)
+            _marketSymbols.value = currentList
+
+            scope.launch {
+                _tickFlow.emit(
+                    LiveTick(
+                        token = token,
+                        symbol = cleanSym,
                         ltp = ltp,
                         volume = volume,
                         timestamp = timestamp
@@ -1093,15 +1183,17 @@ class SmartApiBackendClient {
                         val results = mutableListOf<StockSearchResult>()
                         for (i in 0 until resultsArray.length()) {
                             val item = resultsArray.optJSONObject(i) ?: continue
-                            results.add(
-                                StockSearchResult(
-                                    name = item.optString("name", item.optString("symbol", "")),
-                                    symbol = item.optString("symbol", ""),
-                                    token = item.optString("token", ""),
-                                    exchange = item.optString("exchange", "NSE"),
-                                    instrumentType = item.optString("instrumentType", item.optString("instrumenttype", "EQ"))
-                                )
+                            val res = StockSearchResult(
+                                name = item.optString("name", item.optString("symbol", "")),
+                                symbol = item.optString("symbol", ""),
+                                token = item.optString("token", ""),
+                                exchange = item.optString("exchange", "NSE"),
+                                instrumentType = item.optString("instrumentType", item.optString("instrumenttype", "EQ"))
                             )
+                            if (res.token.isNotBlank()) {
+                                registerScrip(res.symbol, res.token, res.exchange, res.name)
+                            }
+                            results.add(res)
                         }
 
                         if (results.isNotEmpty()) {
