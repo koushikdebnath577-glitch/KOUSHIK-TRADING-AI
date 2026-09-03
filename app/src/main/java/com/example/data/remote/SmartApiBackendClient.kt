@@ -248,6 +248,10 @@ class SmartApiBackendClient {
                     isWebSocketActive = true
                     _connectionStatus.value = ConnectionStatus.CONNECTED_WAITING_FOR_TICK
                     Log.i(
+                        "ANDROID WS CONNECT",
+                        "[ANDROID WS CONNECT] Connected to $targetWsUrl | HTTP: ${response.code} ${response.message} | State: ${_connectionStatus.value.label}"
+                    )
+                    Log.i(
                         "WEBSOCKET_CONNECT",
                         "[WEBSOCKET_CONNECT] Connected successfully to $targetWsUrl | HTTP: ${response.code} ${response.message} | State: ${_connectionStatus.value.label}"
                     )
@@ -307,10 +311,12 @@ class SmartApiBackendClient {
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    Log.i("ANDROID WS MESSAGE", "[ANDROID WS MESSAGE] Text payload received: $text")
                     handleIncomingWebSocketMessage(text)
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                    Log.i("ANDROID WS MESSAGE", "[ANDROID WS MESSAGE] Binary payload received, size: ${bytes.size} bytes")
                     val text = try {
                         bytes.utf8()
                     } catch (e: Exception) {
@@ -339,6 +345,10 @@ class SmartApiBackendClient {
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.e(
+                        "ANDROID WS CONNECT",
+                        "[ANDROID WS CONNECT] Connection failed to $targetWsUrl | error: ${t.message} | HTTP response code: ${response?.code ?: "N/A"}"
+                    )
+                    Log.e(
                         TAG,
                         "[WS FAILURE]\n" +
                         "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
@@ -363,15 +373,22 @@ class SmartApiBackendClient {
     private fun parseBinarySmartApiPacket(data: ByteArray) {
         if (data.size < 27) return
         try {
-            // Mode 1/2/3 Angel One binary tick parser
+            // SmartStream V2 binary tick packet
+            // Byte 0: mode, Byte 1: exchangeType, Bytes 2..26: token string (25 bytes null-terminated)
+            // Bytes 27..34: sequence number (8 bytes LE), Bytes 35..42: exchange timestamp (8 bytes LE)
+            // Bytes 43..50: last traded price (8 bytes LE in paise)
             val tokenBytes = ByteArray(25)
             System.arraycopy(data, 2, tokenBytes, 0, 25)
             val token = String(tokenBytes).trim().replace("\u0000", "")
             if (token.isEmpty()) return
 
             val buffer = java.nio.ByteBuffer.wrap(data).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            val rawLtp = if (data.size >= 35) buffer.getLong(27) else buffer.getInt(27).toLong()
+            val exchangeTimestamp = if (data.size >= 43) buffer.getLong(35) else System.currentTimeMillis()
+            val rawLtp = if (data.size >= 51) buffer.getLong(43) else if (data.size >= 8) buffer.getInt(4).toLong() else 0L
             val ltp = if (rawLtp > 0) rawLtp / 100.0 else 0.0
+            val receivedAt = System.currentTimeMillis()
+
+            Log.i("ANDROID TICK PARSED", "[ANDROID TICK PARSED] token: $token | ltp: $ltp | exchangeTimestamp: $exchangeTimestamp | receivedAt: $receivedAt")
 
             if (ltp > 0.0) {
                 processExtractedTick(
@@ -384,7 +401,7 @@ class SmartApiBackendClient {
                     change = 0.0,
                     changePercent = 0.0,
                     volume = 0L,
-                    timestamp = System.currentTimeMillis()
+                    timestamp = exchangeTimestamp
                 )
             }
         } catch (e: Exception) {
@@ -490,6 +507,9 @@ class SmartApiBackendClient {
         val volume = json.optLong("volume", json.optLong("tradeVolume", json.optLong("v", json.optLong("vol", 0L))))
         val timestamp = json.optLong("timestamp", json.optLong("exchangeTimestamp", json.optLong("time", System.currentTimeMillis())))
 
+        val receivedAt = System.currentTimeMillis()
+        Log.i("ANDROID TICK PARSED", "[ANDROID TICK PARSED] token: $token | ltp: $ltp | exchangeTimestamp: $timestamp | receivedAt: $receivedAt")
+
         if (ltp > 0.0) {
             processExtractedTick(
                 token = token,
@@ -534,6 +554,7 @@ class SmartApiBackendClient {
 
         val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(lastTickReceivedAt))
         
+        Log.i("LIVE STATUS", "[LIVE STATUS] Status: LIVE | token: $token | ltp: $ltp | exchangeTimestamp: $timestamp | receivedAt: $lastTickReceivedAt")
         Log.i("ANGELONE_RAW_TICK", "[ANGELONE_RAW_TICK] Token: $token | Symbol: $symbol | Raw Angel LTP: $angelOneLtp | Volume: $volume | Timestamp: $timestamp")
         Log.i("BACKEND_FORWARD", "[BACKEND_FORWARD] Token: $token | Symbol: $symbol | Forwarded LTP: $backendForwardedLtp | Timestamp: $timestamp")
         Log.i("ANDROID_RECEIVED", "[ANDROID_RECEIVED] Status: LIVE | Symbol: $symbol | Token: $token | LTP: $ltp | Timestamp: $timestamp")
@@ -820,8 +841,97 @@ class SmartApiBackendClient {
     }
 
     /**
+     * Calculates the newest valid trading session date range in IST (Asia/Kolkata)
+     * for Angel One SmartAPI historical candle requests (fromdate to todate).
+     */
+    private fun calculateTradingSessionDateRange(timeframe: Timeframe): Pair<String, String> {
+        val istZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).apply {
+            timeZone = istZone
+        }
+
+        val now = java.util.Calendar.getInstance(istZone)
+        val sessionCal = java.util.Calendar.getInstance(istZone)
+
+        val dayOfWeek = sessionCal.get(java.util.Calendar.DAY_OF_WEEK)
+        val hour = sessionCal.get(java.util.Calendar.HOUR_OF_DAY)
+        val minute = sessionCal.get(java.util.Calendar.MINUTE)
+
+        // Adjust for weekend or pre-market time to determine the latest active/completed trading session
+        when (dayOfWeek) {
+            java.util.Calendar.SATURDAY -> {
+                sessionCal.add(java.util.Calendar.DAY_OF_MONTH, -1) // Roll back to Friday
+            }
+            java.util.Calendar.SUNDAY -> {
+                sessionCal.add(java.util.Calendar.DAY_OF_MONTH, -2) // Roll back to Friday
+            }
+            java.util.Calendar.MONDAY -> {
+                if (hour < 9 || (hour == 9 && minute < 15)) {
+                    sessionCal.add(java.util.Calendar.DAY_OF_MONTH, -3) // Roll back to Friday
+                }
+            }
+            else -> {
+                if (hour < 9 || (hour == 9 && minute < 15)) {
+                    sessionCal.add(java.util.Calendar.DAY_OF_MONTH, -1) // Roll back to previous weekday
+                }
+            }
+        }
+
+        // Set session end time (todate)
+        val endCal = sessionCal.clone() as java.util.Calendar
+        val isTodaySession = now.get(java.util.Calendar.YEAR) == sessionCal.get(java.util.Calendar.YEAR) &&
+                now.get(java.util.Calendar.DAY_OF_YEAR) == sessionCal.get(java.util.Calendar.DAY_OF_YEAR)
+
+        if (isTodaySession && (hour < 15 || (hour == 15 && minute <= 30))) {
+            endCal.set(java.util.Calendar.HOUR_OF_DAY, hour)
+            endCal.set(java.util.Calendar.MINUTE, minute)
+        } else {
+            endCal.set(java.util.Calendar.HOUR_OF_DAY, 15)
+            endCal.set(java.util.Calendar.MINUTE, 30)
+        }
+        endCal.set(java.util.Calendar.SECOND, 0)
+        endCal.set(java.util.Calendar.MILLISECOND, 0)
+
+        // Set session start time (fromdate) based on timeframe granularity
+        val startCal = sessionCal.clone() as java.util.Calendar
+        when (timeframe) {
+            Timeframe.SEC_1, Timeframe.SEC_5, Timeframe.SEC_15, Timeframe.SEC_30,
+            Timeframe.MIN_1, Timeframe.MIN_3, Timeframe.MIN_5 -> {
+                startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                startCal.set(java.util.Calendar.MINUTE, 15)
+                startCal.set(java.util.Calendar.SECOND, 0)
+                startCal.set(java.util.Calendar.MILLISECOND, 0)
+            }
+            Timeframe.MIN_15, Timeframe.MIN_30 -> {
+                startCal.add(java.util.Calendar.DAY_OF_MONTH, -7)
+                startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                startCal.set(java.util.Calendar.MINUTE, 15)
+                startCal.set(java.util.Calendar.SECOND, 0)
+                startCal.set(java.util.Calendar.MILLISECOND, 0)
+            }
+            Timeframe.HOUR_1 -> {
+                startCal.add(java.util.Calendar.DAY_OF_MONTH, -30)
+                startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                startCal.set(java.util.Calendar.MINUTE, 15)
+                startCal.set(java.util.Calendar.SECOND, 0)
+                startCal.set(java.util.Calendar.MILLISECOND, 0)
+            }
+            Timeframe.DAY_1 -> {
+                startCal.add(java.util.Calendar.DAY_OF_MONTH, -180)
+                startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                startCal.set(java.util.Calendar.MINUTE, 15)
+                startCal.set(java.util.Calendar.SECOND, 0)
+                startCal.set(java.util.Calendar.MILLISECOND, 0)
+            }
+        }
+
+        return Pair(sdf.format(startCal.time), sdf.format(endCal.time))
+    }
+
+    /**
      * Fetches candlestick data from GET /api/candles
      * Supports both sub-second intervals (1s, 5s, 15s, 30s) and standard intervals (ONE_MINUTE, FIVE_MINUTE, etc.)
+     * Queries the authentic session date range (fromdate to todate) from Angel One SmartAPI.
      */
     suspend fun fetchCandles(
         symbolToken: String,
@@ -846,7 +956,11 @@ class SmartApiBackendClient {
             Timeframe.DAY_1 -> "ONE_DAY"
         }
 
-        val targetUrl = "${backendConfig.apiBaseUrl}/candles?symboltoken=$sanitizedToken&exchange=$exchange&interval=$intervalStr&count=$count"
+        val (fromDateStr, toDateStr) = calculateTradingSessionDateRange(timeframe)
+        val encodedFrom = java.net.URLEncoder.encode(fromDateStr, "UTF-8")
+        val encodedTo = java.net.URLEncoder.encode(toDateStr, "UTF-8")
+
+        val targetUrl = "${backendConfig.apiBaseUrl}/candles?symboltoken=$sanitizedToken&exchange=$exchange&interval=$intervalStr&fromdate=$encodedFrom&todate=$encodedTo&count=$count"
         val maxRetries = 2
         val backoffDelays = listOf(0L, 1000L)
 
@@ -873,26 +987,47 @@ class SmartApiBackendClient {
 
                             for (i in 0 until dataArr.length()) {
                                 val item = dataArr.optJSONObject(i) ?: continue
-                                candleList.add(
-                                    Candle(
-                                        timestamp = item.optLong("timestamp", System.currentTimeMillis()),
-                                        open = item.optDouble("open", 0.0),
-                                        high = item.optDouble("high", 0.0),
-                                        low = item.optDouble("low", 0.0),
-                                        close = item.optDouble("close", 0.0),
-                                        volume = item.optLong("volume", 0L),
-                                        isComplete = item.optBoolean("isComplete", true)
+                                val timestamp = item.optLong("timestamp", 0L)
+                                val open = item.optDouble("open", 0.0)
+                                val high = item.optDouble("high", 0.0)
+                                val low = item.optDouble("low", 0.0)
+                                val close = item.optDouble("close", 0.0)
+                                val volume = item.optLong("volume", 0L)
+                                val isComplete = item.optBoolean("isComplete", true)
+
+                                // Validate candle OHLC integrity (must be valid non-zero positive prices)
+                                if (timestamp > 0L && open > 0.0 && high > 0.0 && low > 0.0 && close > 0.0 && high >= low) {
+                                    candleList.add(
+                                        Candle(
+                                            timestamp = timestamp,
+                                            open = open,
+                                            high = high,
+                                            low = low,
+                                            close = close,
+                                            volume = volume,
+                                            isComplete = isComplete
+                                        )
                                     )
-                                )
+                                }
                             }
 
                             if (candleList.isNotEmpty()) {
-                                val stock = _marketSymbols.value.find { it.token == sanitizedToken }
-                                val symbolKey = stock?.symbol ?: sanitizedToken
+                                // Sort by timestamp ASC to maintain strict chronological order
+                                candleList.sortBy { it.timestamp }
+
+                                val symbolKey = resolveSymbolForToken(sanitizedToken)
                                 val cacheKey = "${symbolKey}_${timeframe.name}"
                                 candleCache[cacheKey] = candleList.toMutableList()
 
-                                Log.i("CHART_DATA", "[CHART_DATA] Loaded ${candleList.size} candles for $symbolKey ($sanitizedToken) at $timeframe from backend endpoint")
+                                val lastCandle = candleList.last()
+                                val latestDateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).apply {
+                                    timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+                                }.format(java.util.Date(lastCandle.timestamp))
+
+                                Log.i(
+                                    "CHART_DATA",
+                                    "[CHART_DATA] Loaded ${candleList.size} authentic candles for $symbolKey (Token: $sanitizedToken) at $timeframe | Session Range: $fromDateStr to $toDateStr | Latest Candle: $latestDateStr Close: ₹${lastCandle.close}"
+                                )
                                 return@withContext candleList
                             }
                         }

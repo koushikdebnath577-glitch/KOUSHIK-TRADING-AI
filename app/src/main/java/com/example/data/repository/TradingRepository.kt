@@ -174,61 +174,129 @@ class TradingRepository(
         }
     }
 
+    private fun resolveInstrumentInfo(symbol: String): Pair<String, String> {
+        val trimmed = symbol.trim()
+
+        // 1. Search in stocks list
+        val stock = marketSymbols.value.find {
+            it.symbol.equals(trimmed, ignoreCase = true) ||
+            it.name.equals(trimmed, ignoreCase = true)
+        }
+        if (stock != null && stock.token.isNotBlank()) {
+            return Pair(stock.token, stock.exchange.ifEmpty { "NSE" })
+        }
+
+        // 2. Search in live indices list
+        val liveIndex = _indices.value.find {
+            it.symbol.equals(trimmed, ignoreCase = true) ||
+            (it.alias != null && it.alias.equals(trimmed, ignoreCase = true)) ||
+            it.name.equals(trimmed, ignoreCase = true) ||
+            it.id.equals(trimmed, ignoreCase = true)
+        }
+        if (liveIndex != null && liveIndex.token.isNotBlank()) {
+            return Pair(liveIndex.token, liveIndex.exchange.ifEmpty { "NSE" })
+        }
+
+        // 3. Search in default master indices list
+        val defaultIndex = IndicesDataProvider.DEFAULT_INDICES.find {
+            it.symbol.equals(trimmed, ignoreCase = true) ||
+            (it.alias != null && it.alias.equals(trimmed, ignoreCase = true)) ||
+            it.name.equals(trimmed, ignoreCase = true) ||
+            it.id.equals(trimmed, ignoreCase = true)
+        }
+        if (defaultIndex != null && defaultIndex.token.isNotBlank()) {
+            return Pair(defaultIndex.token, defaultIndex.exchange.ifEmpty { "NSE" })
+        }
+
+        // 4. Standard known token mappings fallback
+        val token = when (trimmed.uppercase()) {
+            "NIFTY", "NIFTY 50", "NIFTY50" -> "99926000"
+            "BANKNIFTY", "NIFTY BANK", "NIFTYBANK" -> "99926009"
+            "FINNIFTY", "NIFTY FINANCIAL SERVICES", "NIFTY FIN SERVICE" -> "99926037"
+            "MIDCPNIFTY", "NIFTY MIDCAP SELECT" -> "99926074"
+            "NIFTY NEXT 50", "NIFTYNXT50" -> "99926004"
+            "NIFTY IT" -> "99926008"
+            "NIFTY AUTO" -> "99926001"
+            "NIFTY PHARMA" -> "99926011"
+            "NIFTY FMCG" -> "99926005"
+            "NIFTY METAL" -> "99926007"
+            "NIFTY ENERGY" -> "99926003"
+            "RELIANCE" -> "2885"
+            "HDFCBANK" -> "1333"
+            "TCS" -> "11536"
+            "INFY" -> "1594"
+            "ICICIBANK" -> "4963"
+            "TATAMOTORS" -> "3456"
+            "SBIN" -> "3045"
+            "ITC" -> "1660"
+            "BHARTIARTL" -> "10604"
+            "LT" -> "11483"
+            else -> "99926000"
+        }
+        return Pair(token, "NSE")
+    }
+
+    private fun getLtpForInstrument(symbol: String): Double? {
+        val stock = marketSymbols.value.find { it.symbol.equals(symbol, ignoreCase = true) }
+        if (stock != null && stock.ltp > 0.0) return stock.ltp
+        val index = _indices.value.find {
+            it.symbol.equals(symbol, ignoreCase = true) ||
+            (it.alias != null && it.alias.equals(symbol, ignoreCase = true))
+        }
+        if (index != null && index.ltp > 0.0) return index.ltp
+        return null
+    }
+
+    private fun getPrevCloseForInstrument(symbol: String): Double? {
+        val stock = marketSymbols.value.find { it.symbol.equals(symbol, ignoreCase = true) }
+        if (stock != null && stock.previousClose > 0.0) return stock.previousClose
+        val index = _indices.value.find {
+            it.symbol.equals(symbol, ignoreCase = true) ||
+            (it.alias != null && it.alias.equals(symbol, ignoreCase = true))
+        }
+        if (index != null && index.prevClose > 0.0) return index.prevClose
+        return null
+    }
+
     private fun loadCandlesForSelected() {
         val symbol = _selectedSymbol.value
         val tf = _selectedTimeframe.value
-        val baseCandles = smartApiClient.getHistoricalCandles(symbol, tf)
+        val (token, exch) = resolveInstrumentInfo(symbol)
 
-        if (baseCandles.isNotEmpty()) {
-            aggregator = CandleAggregator(tf, baseCandles)
-            _activeCandles.value = aggregator?.candles ?: baseCandles
+        // Show cached candles immediately if available for fast UI responsiveness
+        val cachedCandles = smartApiClient.getHistoricalCandles(symbol, tf)
+        if (cachedCandles.isNotEmpty()) {
+            aggregator = CandleAggregator(tf, cachedCandles)
+            _activeCandles.value = aggregator?.candles ?: cachedCandles
 
-            val stock = marketSymbols.value.find { it.symbol == symbol }
-            val ltp = stock?.ltp ?: baseCandles.last().close
-            val prevClose = stock?.previousClose ?: ltp
-            _keyLevels.value = KeyLevelDetector.detectKeyLevels(baseCandles, ltp, prevClose)
+            val currentLtp = getLtpForInstrument(symbol) ?: cachedCandles.last().close
+            val prevClose = getPrevCloseForInstrument(symbol) ?: currentLtp
+            _keyLevels.value = KeyLevelDetector.detectKeyLevels(cachedCandles, currentLtp, prevClose)
             recomputeAnalysis()
-        } else {
-            // Find token and exchange
-            val stock = marketSymbols.value.find { it.symbol == symbol }
-            val token = stock?.token ?: when (symbol) {
-                "NIFTY 50" -> "99926000"
-                "BANKNIFTY", "NIFTY BANK" -> "99926009"
-                "FINNIFTY", "NIFTY FINANCIAL SERVICES" -> "99926037"
-                "RELIANCE" -> "2885"
-                "HDFCBANK" -> "1333"
-                "TCS" -> "11536"
-                "INFY" -> "1594"
-                "ICICIBANK" -> "4963"
-                "TATAMOTORS" -> "3456"
-                "SBIN" -> "3045"
-                "ITC" -> "1660"
-                "BHARTIARTL" -> "10604"
-                "LT" -> "11483"
-                else -> "99926000"
-            }
-            val exch = stock?.exchange ?: "NSE"
+        }
 
-            scope.launch {
-                val fetchedCandles = smartApiClient.fetchCandles(token, exch, tf)
-                if (fetchedCandles.isNotEmpty()) {
-                    aggregator = CandleAggregator(tf, fetchedCandles)
-                    _activeCandles.value = aggregator?.candles ?: fetchedCandles
+        // Asynchronously fetch fresh, authentic session candles from backend /api/candles
+        scope.launch {
+            val fetchedCandles = smartApiClient.fetchCandles(token, exch, tf)
+            if (fetchedCandles.isNotEmpty()) {
+                aggregator = CandleAggregator(tf, fetchedCandles)
+                _activeCandles.value = aggregator?.candles ?: fetchedCandles
 
-                    val currentStock = marketSymbols.value.find { it.symbol == symbol }
-                    val currentLtp = currentStock?.ltp ?: fetchedCandles.last().close
-                    val prevClose = currentStock?.previousClose ?: currentLtp
-                    _keyLevels.value = KeyLevelDetector.detectKeyLevels(fetchedCandles, currentLtp, prevClose)
-                    recomputeAnalysis()
-                } else {
-                    _activeCandles.value = emptyList()
-                    recomputeAnalysis()
-                }
+                val currentLtp = getLtpForInstrument(symbol) ?: fetchedCandles.last().close
+                val prevClose = getPrevCloseForInstrument(symbol) ?: currentLtp
+                _keyLevels.value = KeyLevelDetector.detectKeyLevels(fetchedCandles, currentLtp, prevClose)
+                recomputeAnalysis()
+            } else if (cachedCandles.isEmpty()) {
+                _activeCandles.value = emptyList()
+                recomputeAnalysis()
             }
         }
     }
 
     private fun handleLiveTick(tick: LiveTick) {
+        val receivedAt = System.currentTimeMillis()
+        android.util.Log.i("REPOSITORY LIVE TICK", "[REPOSITORY LIVE TICK] token: ${tick.token} | ltp: ${tick.ltp} | exchangeTimestamp: ${tick.timestamp} | receivedAt: $receivedAt")
+
         // 1. Update index state if this tick belongs to an index
         val currentIndices = _indices.value.toMutableList()
         val indexIdx = currentIndices.indexOfFirst {

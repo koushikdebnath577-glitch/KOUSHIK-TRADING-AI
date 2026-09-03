@@ -363,10 +363,11 @@ class UpstreamMarketFeed {
     this.stopSimulationFeed();
 
     try {
-      console.log('[SmartStream] Connecting to Angel One Live WebSocket...');
+      const rawAuthToken = authManager.jwtToken ? authManager.jwtToken.replace(/^Bearer\s+/i, '').trim() : '';
+      console.log(`[ANGEL WS CONNECT] Connecting to Angel One Live WebSocket: ${SMARTSTREAM_WS_URL}`);
       this.ws = new WebSocket(SMARTSTREAM_WS_URL, {
         headers: {
-          'Authorization': authManager.jwtToken,
+          'Authorization': rawAuthToken,
           'x-api-key': ANGEL_API_KEY.trim(),
           'x-client-code': ANGEL_CLIENT_ID.trim(),
           'x-feed-token': authManager.feedToken
@@ -374,7 +375,7 @@ class UpstreamMarketFeed {
       });
 
       this.ws.on('open', () => {
-        console.log('[SmartStream] Connected to Angel One Market Feed.');
+        console.log('[ANGEL WS CONNECT] Connected to Angel One Market Feed successfully.');
         this.isConnected = true;
         this.resubscribeAll();
       });
@@ -384,16 +385,16 @@ class UpstreamMarketFeed {
       });
 
       this.ws.on('close', (code, reason) => {
-        console.warn(`[SmartStream] Disconnected (${code}: ${reason}). Reconnecting in 3s...`);
+        console.warn(`[ANGEL WS CONNECT] Disconnected (${code}: ${reason}). Reconnecting in 3s...`);
         this.isConnected = false;
         this.scheduleReconnect();
       });
 
       this.ws.on('error', (err) => {
-        console.error(`[SmartStream] Error: ${err.message}`);
+        console.error(`[ANGEL WS CONNECT] Error: ${err.message}`);
       });
     } catch (err) {
-      console.error(`[SmartStream] Connection error: ${err.message}`);
+      console.error(`[ANGEL WS CONNECT] Connection exception: ${err.message}`);
       this.startSimulationFeed();
     }
   }
@@ -417,11 +418,12 @@ class UpstreamMarketFeed {
     };
 
     this.ws.send(JSON.stringify(payload));
-    console.log(`[SmartStream] Subscribed to ${tokenList.length} tokens.`);
+    console.log(`[ANGEL WS SUBSCRIBE] Subscribing to ${tokenList.length} tokens: ${tokenList.join(',')}`);
   }
 
   subscribeToken(token) {
     this.subscribedTokens.add(token);
+    console.log(`[ANGEL WS SUBSCRIBE] Token added: ${token}`);
     if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN) {
       const payload = {
         correlationID: `koushik_sub_${token}`,
@@ -432,6 +434,7 @@ class UpstreamMarketFeed {
         }
       };
       this.ws.send(JSON.stringify(payload));
+      console.log(`[ANGEL WS SUBSCRIBE] Sent subscribe request for token: ${token}`);
     }
   }
 
@@ -455,22 +458,31 @@ class UpstreamMarketFeed {
       // SmartAPI SmartStream returns binary packets or JSON
       let parsedTick = null;
 
+      let exchangeTimestamp = Date.now();
+      const receivedAt = Date.now();
+
       if (typeof data === 'string') {
         const json = JSON.parse(data);
         const token = String(json.token || json.token_id || json.symboltoken || '');
         const ltpRaw = json.ltp || json.last_traded_price || json.close || 0;
         const ltp = (typeof ltpRaw === 'number' && ltpRaw > 100000 && !String(ltpRaw).includes('.')) ? (ltpRaw / 100.0) : Number(ltpRaw);
+        exchangeTimestamp = json.timestamp || json.exchangeTimestamp || Date.now();
         parsedTick = {
           token,
           ltp,
           angelOneLtp: ltp,
           backendForwardedLtp: ltp,
           volume: json.volume || json.vol || 0,
-          timestamp: json.timestamp || Date.now()
+          timestamp: exchangeTimestamp
         };
       } else if (Buffer.isBuffer(data) && data.length >= 10) {
         // SmartStream V2 Binary Protocol Parser
-        // Byte 0: Subscription mode, Byte 1: Exchange Type (1=NSE_CM), Byte 2..26: Token string (25 bytes null-terminated)
+        // Byte 0: Subscription mode (1=LTP, 2=QUOTE, 3=SNAP_QUOTE)
+        // Byte 1: Exchange Type (1=NSE_CM)
+        // Bytes 2..26: Token string (25 bytes null-terminated ASCII)
+        // Bytes 27..34: Sequence number (int64 LE)
+        // Bytes 35..42: Exchange timestamp (int64 LE)
+        // Bytes 43..50: Last Traded Price (int64 LE in paise)
         let token = '';
         if (data.length >= 27) {
           token = data.toString('utf8', 2, 27).replace(/\0/g, '').trim();
@@ -479,9 +491,16 @@ class UpstreamMarketFeed {
           token = data.readUInt32LE(0).toString();
         }
 
+        if (data.length >= 43) {
+          try {
+            exchangeTimestamp = Number(data.readBigInt64LE ? data.readBigInt64LE(35) : data.readInt32LE(35));
+          } catch (e) {
+            exchangeTimestamp = Date.now();
+          }
+        }
+
         let ltp = 0;
         if (data.length >= 51) {
-          // LTP mode: offset 43 is int64 last traded price in paise
           const ltpPaise = Number(data.readBigInt64LE ? data.readBigInt64LE(43) : data.readInt32LE(43));
           ltp = ltpPaise / 100.0;
         } else if (data.length >= 8) {
@@ -494,21 +513,24 @@ class UpstreamMarketFeed {
           angelOneLtp: ltp,
           backendForwardedLtp: ltp,
           volume: 0,
-          timestamp: Date.now()
+          timestamp: exchangeTimestamp
         };
+
+        console.log(`[ANGEL WS RAW TICK] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
       }
 
       if (parsedTick && parsedTick.token && parsedTick.ltp > 0) {
+        console.log(`[BACKEND TICK] token: ${parsedTick.token} | ltp: ${parsedTick.ltp} | exchangeTimestamp: ${parsedTick.timestamp} | receivedAt: ${receivedAt}`);
         const stockInfo = tokenMap.get(parsedTick.token) || { symbol: `TOKEN_${parsedTick.token}`, exchange: 'NSE' };
         console.log(`[SmartStream Tick Audit] Symbol: ${stockInfo.symbol} | Exchange: ${stockInfo.exchange || 'NSE'} | Token: ${parsedTick.token} | Timestamp: ${parsedTick.timestamp} | Angel One LTP: ${parsedTick.angelOneLtp} | Backend Forwarded LTP: ${parsedTick.backendForwardedLtp}`);
-        this.broadcastTick(parsedTick.token, parsedTick.ltp, parsedTick.volume || 0, parsedTick.angelOneLtp, parsedTick.backendForwardedLtp);
+        this.broadcastTick(parsedTick.token, parsedTick.ltp, parsedTick.volume || 0, parsedTick.angelOneLtp, parsedTick.backendForwardedLtp, parsedTick.timestamp);
       }
     } catch (err) {
       console.warn(`[SmartStream] Frame parse exception: ${err.message}`);
     }
   }
 
-  broadcastTick(token, ltp, volume, angelOneLtp = ltp, backendForwardedLtp = ltp) {
+  broadcastTick(token, ltp, volume, angelOneLtp = ltp, backendForwardedLtp = ltp, exchangeTimestamp = Date.now()) {
     const stockInfo = tokenMap.get(token) || { symbol: `TOKEN_${token}`, exchange: 'NSE', prevClose: ltp };
     stockInfo.ltp = ltp;
     const change = stockInfo.prevClose > 0 ? Math.round((ltp - stockInfo.prevClose) * 100) / 100 : 0.0;
@@ -517,6 +539,7 @@ class UpstreamMarketFeed {
     // Update IndicesManager if token matches an index
     indicesManager.updateIndexFromTick(token, ltp, change, changePercent, ltp, ltp, stockInfo.prevClose);
 
+    const receivedAt = Date.now();
     const tickPayload = {
       type: 'tick',
       token,
@@ -528,9 +551,12 @@ class UpstreamMarketFeed {
       change,
       changePercent,
       volume: volume || 0,
-      timestamp: Date.now()
+      timestamp: exchangeTimestamp,
+      exchangeTimestamp: exchangeTimestamp,
+      receivedAt: receivedAt
     };
 
+    console.log(`[BACKEND BROADCAST] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
     console.log(`[DATA AUDIT: BACKEND FORWARD] Symbol: ${stockInfo.symbol} | Exchange: ${stockInfo.exchange || 'NSE'} | Token: ${token} | Timestamp: ${tickPayload.timestamp} | Angel One LTP: ${angelOneLtp} | Backend Forwarded LTP: ${backendForwardedLtp}`);
 
     // Aggregate into 1s, 5s, 15s, 30s candles
