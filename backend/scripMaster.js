@@ -74,6 +74,7 @@ const DEFAULT_FALLBACK_STOCKS = [
   { name: 'NIFTY BANK INDEX', symbol: 'BANKNIFTY', token: '99926009', exchange: 'NSE', instrumentType: 'AMXIDX' },
   { name: 'NIFTY FINANCIAL SERVICES', symbol: 'FINNIFTY', token: '99926037', exchange: 'NSE', instrumentType: 'AMXIDX' },
   { name: 'INDIA VIX VOLATILITY INDEX', symbol: 'INDIA VIX', token: '99926017', exchange: 'NSE', instrumentType: 'AMXIDX' },
+  { name: 'Bharat Electronics Ltd', symbol: 'BEL-EQ', token: '383', exchange: 'NSE', instrumentType: 'EQ' },
   { name: 'Reliance Industries Ltd', symbol: 'RELIANCE-EQ', token: '2885', exchange: 'NSE', instrumentType: 'EQ' },
   { name: 'HDFC Bank Ltd', symbol: 'HDFCBANK-EQ', token: '1333', exchange: 'NSE', instrumentType: 'EQ' },
   { name: 'Tata Consultancy Services Ltd', symbol: 'TCS-EQ', token: '11536', exchange: 'NSE', instrumentType: 'EQ' },
@@ -120,7 +121,9 @@ const DEFAULT_FALLBACK_STOCKS = [
   { name: 'HDFC Life Insurance Co Ltd', symbol: 'HDFCLIFE-EQ', token: '467', exchange: 'NSE', instrumentType: 'EQ' },
   { name: 'HDFC Asset Management Co Ltd', symbol: 'HDFCAMC-EQ', token: '4244', exchange: 'NSE', instrumentType: 'EQ' },
   { name: 'SBI Life Insurance Co Ltd', symbol: 'SBILIFE-EQ', token: '21808', exchange: 'NSE', instrumentType: 'EQ' },
-  { name: 'SBI Cards and Payment Services Ltd', symbol: 'SBICARD-EQ', token: '17971', exchange: 'NSE', instrumentType: 'EQ' }
+  { name: 'SBI Cards and Payment Services Ltd', symbol: 'SBICARD-EQ', token: '17971', exchange: 'NSE', instrumentType: 'EQ' },
+  { name: 'Bharat Heavy Electricals Ltd', symbol: 'BHEL-EQ', token: '438', exchange: 'NSE', instrumentType: 'EQ' },
+  { name: 'Hindustan Aeronautics Ltd', symbol: 'HAL-EQ', token: '2303', exchange: 'NSE', instrumentType: 'EQ' }
 ];
 
 class ScripMasterManager {
@@ -153,6 +156,19 @@ class ScripMasterManager {
         }
       }
     }
+
+    // Special aliases for renamed or demerged scrips
+    const tataMotorsScrip = this.tokenIndex.get('3456');
+    if (tataMotorsScrip) {
+      this.symbolIndex.set('TATAMOTORS', tataMotorsScrip);
+      this.symbolIndex.set('TATAMOTORS-EQ', tataMotorsScrip);
+    }
+    const belScrip = this.tokenIndex.get('383');
+    if (belScrip) {
+      this.symbolIndex.set('BEL', belScrip);
+      this.symbolIndex.set('BEL-EQ', belScrip);
+    }
+
     this.totalInstruments = this.scrips.length;
   }
 
@@ -171,7 +187,15 @@ class ScripMasterManager {
         const raw = fs.readFileSync(CACHE_FILE_PATH, 'utf8');
         const parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.scrips) && parsed.scrips.length > 0) {
-          this.scrips = parsed.scrips;
+          // Merge fallback stocks so fundamental symbols and indices are always present
+          const existingTokens = new Set(parsed.scrips.map(s => String(s.token).trim()));
+          const merged = [...parsed.scrips];
+          for (const fallback of DEFAULT_FALLBACK_STOCKS) {
+            if (!existingTokens.has(String(fallback.token).trim())) {
+              merged.push(fallback);
+            }
+          }
+          this.scrips = merged;
           this.lastUpdated = parsed.lastUpdated ? new Date(parsed.lastUpdated) : new Date();
           this.rebuildIndices();
           cacheLoaded = true;

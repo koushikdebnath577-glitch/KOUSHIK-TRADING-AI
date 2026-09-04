@@ -60,6 +60,7 @@ const STOCK_DIRECTORY = [
   { symbol: 'BANKNIFTY', name: 'NIFTY BANK INDEX', token: '99926009', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
   { symbol: 'FINNIFTY', name: 'NIFTY FINANCIAL SERVICES', token: '99926037', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
   { symbol: 'RELIANCE', name: 'Reliance Industries Ltd', token: '2885', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
+  { symbol: 'BEL', name: 'Bharat Electronics Ltd', token: '383', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
   { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', token: '1333', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
   { symbol: 'TCS', name: 'Tata Consultancy Services', token: '11536', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
   { symbol: 'INFY', name: 'Infosys Ltd', token: '1594', exchange: 'NSE', ltp: 0.0, prevClose: 0.0 },
@@ -472,10 +473,13 @@ class UpstreamMarketFeed {
     const tokenStr = String(token).trim();
     if (!tokenStr) return;
     this.subscribedTokens.add(tokenStr);
+
+    let scrip = scripMasterManager.getByToken(tokenStr);
+    const sym = scrip ? scrip.symbol.replace(/-EQ$/i, '') : tokenStr;
+    console.log(`[BACKEND_SUBSCRIBE] token: ${tokenStr} | symbol: ${sym}`);
     console.log(`[ANGEL WS SUBSCRIBE] Dynamic Token added: ${tokenStr}`);
 
     if (!tokenMap.has(tokenStr)) {
-      const scrip = scripMasterManager.getByToken(tokenStr);
       if (scrip) {
         const cleanSym = scrip.symbol.replace(/-EQ$/i, '');
         const stockInfo = {
@@ -546,6 +550,7 @@ class UpstreamMarketFeed {
           volume: json.volume || json.vol || 0,
           timestamp: exchangeTimestamp
         };
+        console.log(`[ANGEL_RAW_TICK] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
       } else if (Buffer.isBuffer(data) && data.length >= 10) {
         // SmartStream V2 Binary Protocol Parser
         // Byte 0: Subscription mode (1=LTP, 2=QUOTE, 3=SNAP_QUOTE)
@@ -589,7 +594,7 @@ class UpstreamMarketFeed {
             timestamp: exchangeTimestamp
           };
 
-          console.log(`[ANGEL RAW TICK] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
+          console.log(`[ANGEL_RAW_TICK] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
         }
       }
 
@@ -649,7 +654,7 @@ class UpstreamMarketFeed {
       receivedAt: receivedAt
     };
 
-    console.log(`[BACKEND BROADCAST] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
+    console.log(`[BACKEND_BROADCAST] token: ${token} | ltp: ${ltp} | exchangeTimestamp: ${exchangeTimestamp} | receivedAt: ${receivedAt}`);
     console.log(`[DATA AUDIT: BACKEND FORWARD] Symbol: ${stockInfo.symbol} | Exchange: ${stockInfo.exchange || 'NSE'} | Token: ${token} | Timestamp: ${tickPayload.timestamp} | Angel One LTP: ${angelOneLtp} | Backend Forwarded LTP: ${backendForwardedLtp}`);
 
     // Aggregate into 1s, 5s, 15s, 30s candles
@@ -712,7 +717,7 @@ async function fetchAndBroadcastSingleQuote(token) {
     );
     if (response.data && response.data.status && response.data.data && response.data.data.fetched) {
       const item = response.data.data.fetched[0];
-      if (item && item.token) {
+      if (item && (item.token || item.symbolToken)) {
         const ltp = Number(item.ltp || item.lastPrice || 0);
         const change = Number(item.netChange || item.change || 0);
         const changePercent = Number(item.percentChange || item.changePercent || 0);
@@ -1062,10 +1067,51 @@ app.get('/api/search', (req, res) => {
 });
 
 /**
+ * GET /api/scrip?symbol=BEL&token=383
+ * Fast exact scrip lookup from Angel One Scrip Master
+ */
+app.get(['/api/scrip', '/scrip'], (req, res) => {
+  const symbol = (req.query.symbol || req.query.sym || req.query.q || '').toString().trim();
+  const token = (req.query.token || req.query.symboltoken || '').toString().trim();
+
+  let scrip = null;
+  if (token) {
+    scrip = scripMasterManager.getByToken(token);
+  }
+  if (!scrip && symbol) {
+    scrip = scripMasterManager.getBySymbol(symbol) ||
+            scripMasterManager.getBySymbol(`${symbol}-EQ`) ||
+            scripMasterManager.getBySymbol(symbol.replace(/-EQ$/i, ''));
+  }
+  if (!scrip && symbol) {
+    const matches = scripMasterManager.search(symbol, 5);
+    if (matches && matches.length > 0) {
+      scrip = matches[0];
+    }
+  }
+
+  if (scrip) {
+    const cleanSym = scrip.symbol.replace(/-EQ$/i, '');
+    return res.json({
+      status: true,
+      data: {
+        name: scrip.name,
+        symbol: cleanSym,
+        tradingSymbol: scrip.symbol,
+        token: String(scrip.token),
+        exchange: scrip.exchange || 'NSE',
+        instrumentType: scrip.instrumentType || 'EQ'
+      }
+    });
+  }
+  return res.status(404).json({ status: false, error: `Scrip not found for symbol: ${symbol}, token: ${token}` });
+});
+
+/**
  * GET /api/quote?symboltoken=TOKEN&exchange=NSE
  * Fetch real-time market quote with circuit limits and price statistics
  */
-app.get('/api/quote', async (req, res) => {
+app.get(['/api/quote', '/quote'], async (req, res) => {
   const symbolToken = (req.query.symboltoken || req.query.token || '').toString().trim();
   const exchange = (req.query.exchange || 'NSE').toString().toUpperCase();
 
@@ -1145,7 +1191,7 @@ app.get('/api/quote', async (req, res) => {
  * Historical & live aggregated candlestick data
  * Parameters: exchange, symboltoken, interval (1s, 5s, 15s, 30s, ONE_MINUTE, FIVE_MINUTE, etc.), fromdate, todate
  */
-app.get('/api/candles', async (req, res) => {
+app.get(['/api/candles', '/candles'], async (req, res) => {
   const symbolToken = (req.query.symboltoken || req.query.token || '').toString().trim();
   const exchange = (req.query.exchange || 'NSE').toString().toUpperCase();
   const interval = (req.query.interval || 'ONE_MINUTE').toString();
@@ -1337,6 +1383,23 @@ server.listen(PORT, async () => {
   try {
     await scripMasterManager.initialize();
     indicesManager.initialize(scripMasterManager);
+
+    scripMasterManager.scrips.forEach(scrip => {
+      if (!scrip) return;
+      const cleanSym = (scrip.symbol || '').replace(/-EQ$/i, '');
+      const item = {
+        symbol: cleanSym,
+        name: scrip.name || cleanSym,
+        token: String(scrip.token).trim(),
+        exchange: scrip.exchange || 'NSE',
+        ltp: 0.0,
+        prevClose: 0.0
+      };
+      if (!tokenMap.has(item.token)) tokenMap.set(item.token, item);
+      if (cleanSym && !tokenMap.has(cleanSym)) tokenMap.set(cleanSym, item);
+      if (scrip.symbol && !tokenMap.has(scrip.symbol)) tokenMap.set(scrip.symbol, item);
+    });
+    console.log(`[TokenMap] Populated ${tokenMap.size} token/symbol entries from Scrip Master.`);
   } catch (smErr) {
     console.error(`[Init] Scrip Master initialization error: ${smErr.message}`);
     indicesManager.initialize(null);

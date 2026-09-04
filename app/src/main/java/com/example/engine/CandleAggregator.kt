@@ -55,13 +55,16 @@ class CandleAggregator(
             _candles[lastIndex] = updated
             updated
         } else if (candleBucketStart > lastCandle.timestamp) {
-            // Close previous candle and open a new one
+            // Check if last candle belongs to the same trading day / session
+            val isSameSession = isSameTradingDay(lastCandle.timestamp, tickTime)
             _candles[lastIndex] = lastCandle.copy(isComplete = true)
+            // If cross-session (e.g. yesterday to today), new candle opens at current tick price, not yesterday's close
+            val openPrice = if (isSameSession) lastCandle.close else tickPrice
             val newCandle = Candle(
                 timestamp = candleBucketStart,
-                open = lastCandle.close, // open at previous close for seamless continuity
-                high = max(lastCandle.close, tickPrice),
-                low = min(lastCandle.close, tickPrice),
+                open = openPrice,
+                high = max(openPrice, tickPrice),
+                low = min(openPrice, tickPrice),
                 close = tickPrice,
                 volume = tickVol,
                 isComplete = false
@@ -77,8 +80,44 @@ class CandleAggregator(
         }
     }
 
+    /**
+     * Injects the current LTP into the latest candle ONLY if it belongs to the current trading session.
+     * Never alters or pollutes previous session/historical candles.
+     */
+    fun injectCurrentSessionLtp(ltp: Double, volume: Long = 0L): Candle? {
+        if (_candles.isEmpty() || ltp <= 0.0) return null
+        val lastIndex = _candles.size - 1
+        val lastCandle = _candles[lastIndex]
+
+        if (!isSameTradingDay(lastCandle.timestamp, System.currentTimeMillis())) {
+            // Belongs to prior trading session; do not inject or alter historical candle series
+            return null
+        }
+
+        val updated = lastCandle.copy(
+            high = max(lastCandle.high, ltp),
+            low = min(lastCandle.low, ltp),
+            close = ltp,
+            volume = if (volume > 0L) lastCandle.volume + volume else lastCandle.volume,
+            isComplete = false
+        )
+        _candles[lastIndex] = updated
+        return updated
+    }
+
     fun setBaseCandles(newBase: List<Candle>) {
         _candles.clear()
         _candles.addAll(newBase)
+    }
+
+    companion object {
+        fun isSameTradingDay(timestamp1: Long, timestamp2: Long): Boolean {
+            if (timestamp1 <= 0L || timestamp2 <= 0L) return false
+            val tz = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+            val cal1 = java.util.Calendar.getInstance(tz).apply { timeInMillis = timestamp1 }
+            val cal2 = java.util.Calendar.getInstance(tz).apply { timeInMillis = timestamp2 }
+            return cal1.get(java.util.Calendar.YEAR) == cal2.get(java.util.Calendar.YEAR) &&
+                   cal1.get(java.util.Calendar.DAY_OF_YEAR) == cal2.get(java.util.Calendar.DAY_OF_YEAR)
+        }
     }
 }

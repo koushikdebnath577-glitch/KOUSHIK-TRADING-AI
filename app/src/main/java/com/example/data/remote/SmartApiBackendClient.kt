@@ -111,6 +111,73 @@ class SmartApiBackendClient {
         dynamicTokenToSymbol[token] = clean
     }
 
+    fun getRegisteredScrip(symbol: String): Pair<String, String>? {
+        val clean = symbol.removeSuffix("-EQ").trim().uppercase()
+        val raw = symbol.trim().uppercase()
+        return dynamicScripRegistry[clean] ?: dynamicScripRegistry[raw]
+    }
+
+    fun getRegisteredSymbol(token: String): String? {
+        return dynamicTokenToSymbol[token.trim()]
+    }
+
+    suspend fun resolveScripFromBackend(symbolOrToken: String): Pair<String, String>? = withContext(Dispatchers.IO) {
+        val sym = symbolOrToken.trim()
+        if (sym.isEmpty()) return@withContext null
+
+        try {
+            // 1. Try GET /api/scrip?symbol=...
+            val scripUrl = "${backendConfig.apiBaseUrl}/api/scrip?symbol=${java.net.URLEncoder.encode(sym, "UTF-8")}"
+            val request = Request.Builder().url(scripUrl).get().build()
+            okHttpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val json = JSONObject(body)
+                        if (json.optBoolean("status", false) && json.has("data")) {
+                            val data = json.getJSONObject("data")
+                            val token = data.optString("token").trim()
+                            val exchange = data.optString("exchange", "NSE").trim()
+                            val resolvedSym = data.optString("symbol", sym).trim()
+                            if (token.isNotEmpty()) {
+                                registerScrip(resolvedSym, token, exchange)
+                                registerScrip(sym, token, exchange)
+                                return@withContext Pair(token, exchange)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Fallback to GET /api/search?q=...
+            val searchUrl = "${backendConfig.apiBaseUrl}/api/search?q=${java.net.URLEncoder.encode(sym, "UTF-8")}"
+            val searchReq = Request.Builder().url(searchUrl).get().build()
+            okHttpClient.newCall(searchReq).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val json = JSONObject(body)
+                        val results = json.optJSONArray("results") ?: json.optJSONArray("data")
+                        if (results != null && results.length() > 0) {
+                            val first = results.getJSONObject(0)
+                            val token = first.optString("token").trim()
+                            val exchange = first.optString("exchange", "NSE").trim()
+                            val resolvedSym = first.optString("symbol", sym).trim()
+                            if (token.isNotEmpty()) {
+                                registerScrip(resolvedSym, token, exchange)
+                                registerScrip(sym, token, exchange)
+                                return@withContext Pair(token, exchange)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Backend scrip resolution error for $symbolOrToken: ${e.message}")
+        }
+        null
+    }
+
     fun subscribeToken(token: String) {
         if (token.isBlank()) return
         subscribeTokens(listOf(token))
@@ -135,6 +202,11 @@ class SmartApiBackendClient {
         val ws = webSocket
         val sent = ws?.send(payloadStr) ?: false
         Log.i("DYNAMIC_SUBSCRIBE", "[DYNAMIC_SUBSCRIBE] Sent WebSocket subscribe payload: $payloadStr | success: $sent")
+
+        cleanTokens.forEach { t ->
+            val sym = getRegisteredSymbol(t) ?: resolveSymbolForToken(t)
+            Log.i("ANDROID_SUBSCRIBE", "[ANDROID_SUBSCRIBE] token: $t | symbol: $sym")
+        }
 
         // Also fetch quote via REST immediately
         scope.launch {
@@ -168,6 +240,7 @@ class SmartApiBackendClient {
         val initialList = listOf(
             StockSymbol("NIFTY 50", "NIFTY 50 INDEX", "99926000", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
             StockSymbol("BANKNIFTY", "NIFTY BANK INDEX", "99926009", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
+            StockSymbol("BEL", "Bharat Electronics Ltd", "383", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
             StockSymbol("RELIANCE", "Reliance Industries Ltd", "2885", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
             StockSymbol("HDFCBANK", "HDFC Bank Ltd", "1333", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
             StockSymbol("TCS", "Tata Consultancy Services", "11536", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
@@ -180,6 +253,7 @@ class SmartApiBackendClient {
             StockSymbol("LT", "Larsen & Toubro Ltd", "11483", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0)
         )
         _marketSymbols.value = initialList
+        initialList.forEach { registerScrip(it.symbol, it.token, it.exchange, it.name) }
     }
 
     fun updateConfig(config: BackendConfig) {
@@ -440,7 +514,7 @@ class SmartApiBackendClient {
             val ltp = if (rawLtp > 0) rawLtp / 100.0 else 0.0
             val receivedAt = System.currentTimeMillis()
 
-            Log.i("ANDROID TICK PARSED", "[ANDROID TICK PARSED] token: $token | ltp: $ltp | exchangeTimestamp: $exchangeTimestamp | receivedAt: $receivedAt")
+            Log.i("ANDROID_TICK_PARSED", "[ANDROID_TICK_PARSED] token: $token | ltp: $ltp | exchangeTimestamp: $exchangeTimestamp | receivedAt: $receivedAt")
 
             if (ltp > 0.0) {
                 processExtractedTick(
@@ -560,7 +634,7 @@ class SmartApiBackendClient {
         val timestamp = json.optLong("timestamp", json.optLong("exchangeTimestamp", json.optLong("time", System.currentTimeMillis())))
 
         val receivedAt = System.currentTimeMillis()
-        Log.i("ANDROID TICK PARSED", "[ANDROID TICK PARSED] token: $token | ltp: $ltp | exchangeTimestamp: $timestamp | receivedAt: $receivedAt")
+        Log.i("ANDROID_TICK_PARSED", "[ANDROID_TICK_PARSED] token: $token | ltp: $ltp | exchangeTimestamp: $timestamp | receivedAt: $receivedAt")
 
         if (ltp > 0.0) {
             processExtractedTick(
@@ -584,6 +658,9 @@ class SmartApiBackendClient {
         if (token == "99926037" || token == "26037") return "FINNIFTY"
         if (token == "99926008") return "NIFTY IT"
         if (token == "99926002") return "NIFTY AUTO"
+        if (token == "383") return "BEL"
+        if (token == "3456") return "TATAMOTORS"
+        if (token == "3045") return "SBIN"
         if (token == "1394") return "HINDUNILVR"
         val dynamic = dynamicTokenToSymbol[token]
         if (dynamic != null) return dynamic
@@ -802,7 +879,7 @@ class SmartApiBackendClient {
         val sanitizedToken = symbolToken.trim()
         if (sanitizedToken.isEmpty()) return@withContext null
 
-        val targetUrl = "${backendConfig.apiBaseUrl}/quote?symboltoken=$sanitizedToken&exchange=$exchange"
+        val targetUrl = "${backendConfig.apiBaseUrl}/api/quote?symboltoken=$sanitizedToken&exchange=$exchange"
         val maxRetries = 2
         val backoffDelays = listOf(0L, 1000L)
 
@@ -1050,7 +1127,7 @@ class SmartApiBackendClient {
         val encodedFrom = java.net.URLEncoder.encode(fromDateStr, "UTF-8")
         val encodedTo = java.net.URLEncoder.encode(toDateStr, "UTF-8")
 
-        val targetUrl = "${backendConfig.apiBaseUrl}/candles?symboltoken=$sanitizedToken&exchange=$exchange&interval=$intervalStr&fromdate=$encodedFrom&todate=$encodedTo&count=$count"
+        val targetUrl = "${backendConfig.apiBaseUrl}/api/candles?symboltoken=$sanitizedToken&exchange=$exchange&interval=$intervalStr&fromdate=$encodedFrom&todate=$encodedTo&count=$count"
         val maxRetries = 2
         val backoffDelays = listOf(0L, 1000L)
 
