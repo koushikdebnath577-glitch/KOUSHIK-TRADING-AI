@@ -4,9 +4,12 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -175,6 +178,12 @@ private fun createTradingViewWebView(
         )
         setBackgroundColor(Color.parseColor("#0D1117"))
 
+        // Set software layer type to avoid Mesa DRI rendernode driver allocation issues in virtualized/container environments
+        try {
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        } catch (_: Exception) {
+        }
+
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -203,10 +212,16 @@ private fun createTradingViewWebView(
                 }, 100)
             }
 
-            @Deprecated("Deprecated in Java")
-            override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
-                super.onReceivedError(view, errorCode, description, failingUrl)
-                android.util.Log.w("TradingViewChart", "WebView error: $errorCode - $description for $failingUrl")
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?
+            ) {
+                super.onReceivedError(view, request, error)
+                val desc = error?.description ?: "Unknown"
+                val code = error?.errorCode ?: -1
+                val url = request?.url?.toString() ?: "N/A"
+                android.util.Log.w("TradingViewChart", "WebView error: $code - $desc for $url")
             }
         }
 
