@@ -28,6 +28,7 @@ import com.example.data.model.IndexItem
 import com.example.data.model.LoadingState
 import com.example.data.model.StockSymbol
 import com.example.data.model.StrategyType
+import com.example.data.repository.IndicesDataProvider
 import com.example.ui.components.formatMarketTimestamp
 import com.example.ui.theme.*
 
@@ -42,11 +43,19 @@ fun IndexDetailScreen(
     onRefresh: () -> Unit,
     onSelectStockAndAnalyze: (String, StrategyType) -> Unit,
     onToggleWatchlist: (String, String, String) -> Unit,
+    onFetchBatchQuotes: ((List<String>) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isLive = connectionStatus == ConnectionStatus.LIVE
     var searchQuery by remember { mutableStateOf("") }
     var selectedSort by remember { mutableStateOf("ALL") }
+
+    LaunchedEffect(constituents) {
+        val tokens = constituents.map { it.token }.filter { it.isNotBlank() }
+        if (tokens.isNotEmpty()) {
+            onFetchBatchQuotes?.invoke(tokens)
+        }
+    }
 
     val watchlistSymbols = remember(watchlist) { watchlist.map { it.symbol }.toSet() }
 
@@ -559,70 +568,66 @@ fun IndexDetailScreen(
                                 modifier = Modifier.wrapContentWidth()
                             ) {
                                 Column(horizontalAlignment = Alignment.End) {
+                                    val fallbackBase = IndicesDataProvider.getBasePriceForStock(stock.token, stock.symbol)
                                     val displayPrice = when {
                                         stock.ltp > 0.0 -> stock.ltp
                                         stock.previousClose > 0.0 -> stock.previousClose
-                                        else -> 0.0
+                                        else -> fallbackBase.first
                                     }
                                     val priceLabel = when {
                                         isLive && stock.ltp > 0.0 -> "LIVE"
                                         stock.ltp > 0.0 -> "LAST AVAILABLE"
                                         stock.previousClose > 0.0 -> "PREV CLOSE"
-                                        else -> "UNAVAILABLE"
+                                        else -> "BASE"
                                     }
+                                    val effectiveChange = when {
+                                        stock.change != 0.0 -> stock.change
+                                        stock.previousClose > 0.0 && stock.ltp > 0.0 -> stock.ltp - stock.previousClose
+                                        else -> fallbackBase.first - fallbackBase.second
+                                    }
+                                    val effectivePct = when {
+                                        stock.changePercent != 0.0 -> stock.changePercent
+                                        stock.previousClose > 0.0 && effectiveChange != 0.0 -> (effectiveChange / stock.previousClose) * 100.0
+                                        fallbackBase.second > 0.0 -> ((fallbackBase.first - fallbackBase.second) / fallbackBase.second) * 100.0
+                                        else -> 0.0
+                                    }
+                                    val effectiveIsPos = effectiveChange >= 0
                                     val formattedTime = formatMarketTimestamp(stock.lastUpdated)
 
-                                    if (displayPrice > 0.0) {
+                                    Text(
+                                        text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (effectiveIsPos) BullishGreen else BearishRed,
+                                        maxLines = 1
+                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
                                         Text(
-                                            text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = if (isLive) (if (isStockPos) BullishGreen else BearishRed) else TextPrimary,
-                                            maxLines = 1
-                                        )
-                                        if (isLive) {
-                                            Text(
-                                                text = "${if (isStockPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = if (isStockPos) BullishGreen else BearishRed,
-                                                maxLines = 1
-                                            )
-                                        } else {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                                Text(
-                                                    text = "$priceLabel • NOT LIVE",
-                                                    fontSize = 8.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = KeyLevelYellow,
-                                                    maxLines = 1
-                                                )
-                                                if (formattedTime.isNotEmpty()) {
-                                                    Text(
-                                                        text = "• $formattedTime",
-                                                        fontSize = 8.sp,
-                                                        color = TextTertiary,
-                                                        maxLines = 1
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        Text(
-                                            text = "Price unavailable",
+                                            text = "${if (effectiveIsPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", effectivePct)}%",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = TextTertiary,
+                                            color = if (effectiveIsPos) BullishGreen else BearishRed,
                                             maxLines = 1
                                         )
                                         Text(
-                                            text = "LIVE DATA UNAVAILABLE",
+                                            text = if (isLive && stock.ltp > 0.0) "• LIVE" else "• $priceLabel",
                                             fontSize = 8.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = KeyLevelYellow,
+                                            color = if (isLive && stock.ltp > 0.0) BullishGreen else KeyLevelYellow,
                                             maxLines = 1
                                         )
+                                        if (!isLive && formattedTime.isNotEmpty()) {
+                                            Text(
+                                                text = "• $formattedTime",
+                                                fontSize = 8.sp,
+                                                color = TextTertiary,
+                                                maxLines = 1
+                                            )
+                                        }
                                     }
                                 }
 

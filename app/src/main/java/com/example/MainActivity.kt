@@ -164,6 +164,9 @@ fun TradingAppRoot(
                     },
                     onToggleWatchlist = { symbol, name, token ->
                         viewModel.toggleWatchlist(symbol, name, token)
+                    },
+                    onFetchBatchQuotes = { tokens ->
+                        viewModel.fetchBatchQuotes(tokens)
                     }
                 )
             } else {
@@ -200,6 +203,9 @@ fun TradingAppRoot(
                         },
                         onSearchScripMaster = { query ->
                             viewModel.searchStocks(query)
+                        },
+                        onFetchBatchQuotes = { tokens ->
+                            viewModel.fetchBatchQuotes(tokens)
                         }
                     )
                     2 -> AnalyzeScreen(

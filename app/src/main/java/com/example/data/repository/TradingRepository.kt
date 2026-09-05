@@ -666,4 +666,8 @@ class TradingRepository(
     suspend fun fetchIndexConstituents(indexIdOrSymbol: String): List<StockSymbol> {
         return smartApiClient.fetchIndexConstituents(indexIdOrSymbol)
     }
+
+    suspend fun fetchQuotesBatch(tokens: List<String>, exchange: String = "NSE"): List<StockSymbol> {
+        return smartApiClient.fetchQuotesBatch(tokens, exchange)
+    }
 }

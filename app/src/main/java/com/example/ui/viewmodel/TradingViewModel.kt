@@ -92,6 +92,37 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         viewModelScope.launch {
+            repository.marketSymbols.collect { symbols ->
+                if (symbols.isEmpty()) return@collect
+                val symbolByToken = symbols.associateBy { it.token }
+                val symbolByName = symbols.associateBy { it.symbol.uppercase().removeSuffix("-EQ") }
+                _uiState.update { state ->
+                    if (state.indexConstituents.isEmpty()) return@update state
+                    val updatedConstituents = state.indexConstituents.map { stock ->
+                        val cleanSym = stock.symbol.uppercase().removeSuffix("-EQ")
+                        val live = symbolByToken[stock.token] ?: symbolByName[cleanSym]
+                        if (live != null && (live.ltp > 0.0 || live.previousClose > 0.0)) {
+                            stock.copy(
+                                ltp = if (live.ltp > 0.0) live.ltp else stock.ltp,
+                                previousClose = if (live.previousClose > 0.0) live.previousClose else stock.previousClose,
+                                change = if (live.change != 0.0) live.change else (if (live.ltp > 0.0 && stock.previousClose > 0.0) live.ltp - stock.previousClose else stock.change),
+                                changePercent = if (live.changePercent != 0.0) live.changePercent else stock.changePercent,
+                                open = if (live.open > 0.0) live.open else stock.open,
+                                high = if (live.high > 0.0) maxOf(stock.high, live.high) else stock.high,
+                                low = if (live.low > 0.0 && stock.low > 0.0) minOf(stock.low, live.low) else (if (live.low > 0.0) live.low else stock.low),
+                                close = if (live.close > 0.0) live.close else stock.close,
+                                volume = if (live.volume > 0L) live.volume else stock.volume,
+                                lastUpdated = live.lastUpdated ?: stock.lastUpdated ?: System.currentTimeMillis()
+                            )
+                        } else {
+                            stock
+                        }
+                    }
+                    state.copy(indexConstituents = updatedConstituents)
+                }
+            }
+        }
+        viewModelScope.launch {
             repository.keyLevels.collect { levels ->
                 _uiState.update { it.copy(keyLevels = levels) }
             }
@@ -203,10 +234,12 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openIndexDetail(index: IndexItem) {
+        val initialConstituents = com.example.data.repository.IndicesDataProvider.getConstituentsForIndex(index.id.ifEmpty { index.symbol })
         _uiState.update { 
             it.copy(
                 selectedIndex = index,
                 isIndexDetailVisible = true,
+                indexConstituents = if (initialConstituents.isNotEmpty()) initialConstituents else it.indexConstituents,
                 constituentsLoadingState = LoadingState.Loading
             ) 
         }
@@ -254,12 +287,57 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
                         constituentsLoadingState = LoadingState.Success
                     ) 
                 }
+
+                // Batch REST Price Fetching: Trigger REST quote fetch for all stock tokens immediately
+                val tokens = constituents.map { it.token }.filter { it.isNotBlank() }
+                if (tokens.isNotEmpty()) {
+                    fetchBatchQuotes(tokens)
+                }
             } catch (e: Exception) {
                 _uiState.update { 
                     it.copy(
                         constituentsLoadingState = LoadingState.Error(e.message ?: "Failed to load constituents")
                     ) 
                 }
+            }
+        }
+    }
+
+    fun fetchBatchQuotes(tokens: List<String>) {
+        val cleanTokens = tokens.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (cleanTokens.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val batchQuotes = repository.fetchQuotesBatch(cleanTokens)
+                if (batchQuotes.isNotEmpty()) {
+                    val quoteByToken = batchQuotes.associateBy { it.token }
+                    val quoteBySym = batchQuotes.associateBy { it.symbol.uppercase().removeSuffix("-EQ") }
+                    _uiState.update { state ->
+                        val updated = state.indexConstituents.map { stock ->
+                            val cleanSym = stock.symbol.uppercase().removeSuffix("-EQ")
+                            val quote = quoteByToken[stock.token] ?: quoteBySym[cleanSym]
+                            if (quote != null && (quote.ltp > 0.0 || quote.previousClose > 0.0)) {
+                                stock.copy(
+                                    ltp = if (quote.ltp > 0.0) quote.ltp else stock.ltp,
+                                    previousClose = if (quote.previousClose > 0.0) quote.previousClose else stock.previousClose,
+                                    change = quote.change,
+                                    changePercent = quote.changePercent,
+                                    open = if (quote.open > 0.0) quote.open else stock.open,
+                                    high = if (quote.high > 0.0) quote.high else stock.high,
+                                    low = if (quote.low > 0.0) quote.low else stock.low,
+                                    close = if (quote.close > 0.0) quote.close else stock.close,
+                                    volume = if (quote.volume > 0L) quote.volume else stock.volume,
+                                    lastUpdated = quote.lastUpdated ?: System.currentTimeMillis()
+                                )
+                            } else {
+                                stock
+                            }
+                        }
+                        state.copy(indexConstituents = updated)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("TradingViewModel", "fetchBatchQuotes error: ${e.message}")
             }
         }
     }

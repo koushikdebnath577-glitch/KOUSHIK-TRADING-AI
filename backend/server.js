@@ -943,7 +943,7 @@ app.get('/health', (req, res) => {
  * GET /api/indices
  * Return list of all 23 supported NSE indices with live market quotes
  */
-app.get('/api/indices', (req, res) => {
+app.get(['/api/indices', '/indices'], (req, res) => {
   try {
     const list = indicesManager.getAllIndices();
     res.json({
@@ -967,16 +967,27 @@ app.get('/api/indices', (req, res) => {
  * GET /api/indices/:indexName/constituents
  * Return constituent stocks for the specified index with live price & stats
  */
-app.get('/api/indices/:indexName/constituents', (req, res) => {
+app.get(['/api/indices/:indexName/constituents', '/indices/:indexName/constituents'], (req, res) => {
   try {
     const indexName = req.params.indexName;
-    const data = indicesManager.getConstituents(indexName, scripMasterManager);
+    const data = indicesManager.getConstituents(indexName, scripMasterManager, tokenMap);
 
     if (!data) {
       return res.status(404).json({
         status: false,
         error: `Index '${indexName}' not found among supported NSE indices.`,
         constituents: []
+      });
+    }
+
+    // Auto-subscribe constituent tokens in background for streaming ticks
+    if (data.constituents && data.constituents.length > 0) {
+      setImmediate(() => {
+        data.constituents.forEach(c => {
+          if (c.token && String(c.token).trim()) {
+            upstreamMarketFeed.subscribeToken(String(c.token).trim());
+          }
+        });
       });
     }
 
@@ -1001,7 +1012,7 @@ app.get('/api/indices/:indexName/constituents', (req, res) => {
  * GET /api/indices/:indexName
  * Return details for a single index
  */
-app.get('/api/indices/:indexName', (req, res) => {
+app.get(['/api/indices/:indexName', '/indices/:indexName'], (req, res) => {
   try {
     const indexName = req.params.indexName;
     const details = indicesManager.getIndexDetails(indexName);
@@ -1110,6 +1121,140 @@ app.get(['/api/scrip', '/scrip'], (req, res) => {
 });
 
 /**
+ * Helper to fetch batch quotes from Angel One SmartAPI or fallback models
+ */
+async function handleBatchQuotes(tokenList, exchange = 'NSE') {
+  const sanitizedTokens = tokenList.map(t => String(t).trim()).filter(Boolean);
+  if (sanitizedTokens.length === 0) return [];
+
+  const resultsMap = new Map();
+
+  // Try fetching live from SmartAPI if authenticated
+  if (isAngelConfigured() && authManager.isAuthenticated) {
+    // Process in chunks of 40 (SmartAPI limit is 50)
+    for (let i = 0; i < sanitizedTokens.length; i += 40) {
+      const chunk = sanitizedTokens.slice(i, i + 40);
+      try {
+        const response = await axios.post(
+          `${SMARTAPI_BASE_URL}/rest/secure/angelbroking/market/v1/quote/`,
+          {
+            mode: 'FULL',
+            exchangeTokens: { [exchange]: chunk }
+          },
+          {
+            headers: authManager.getHeaders(),
+            timeout: 8000
+          }
+        );
+
+        if (response.data && response.data.status && response.data.data && response.data.data.fetched) {
+          for (const item of response.data.data.fetched) {
+            const token = String(item.symbolToken || item.token || '').trim();
+            const ltp = Number(item.ltp || item.lastPrice || 0);
+            const prevClose = Number(item.close || 0);
+            const open = Number(item.open || prevClose || ltp);
+            const high = Number(item.high || ltp);
+            const low = Number(item.low || ltp);
+            const change = Number(item.netChange != null ? item.netChange : (prevClose > 0 ? ltp - prevClose : 0));
+            const changePercent = Number(item.percentChange != null ? item.percentChange : (prevClose > 0 && prevClose !== ltp ? (change / prevClose) * 100 : 0));
+            const volume = Number(item.tradeVolume || item.volume || 0);
+            const tradingSym = item.tradingSymbol || '';
+            const sym = tradingSym.replace(/-EQ$/i, '');
+
+            if (token && (ltp > 0 || prevClose > 0)) {
+              resultsMap.set(token, {
+                token,
+                symbol: sym,
+                tradingSymbol: tradingSym || `${sym}-EQ`,
+                name: item.companyName || sym,
+                exchange: item.exchange || exchange,
+                ltp: ltp > 0 ? ltp : prevClose,
+                previousClose: prevClose > 0 ? prevClose : ltp,
+                close: ltp > 0 ? ltp : prevClose,
+                open,
+                high,
+                low,
+                change: Math.round(change * 100) / 100,
+                changePercent: Math.round(changePercent * 100) / 100,
+                volume,
+                timestamp: new Date().toISOString()
+              });
+
+              upstreamMarketFeed.broadcastTick(token, ltp, volume, ltp, ltp);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[Batch Quote] Chunk fetch error: ${err.message}`);
+      }
+    }
+  }
+
+  // Fill in any missing tokens from tokenMap, scripMaster, or STOCK_INFO_MAP
+  const output = [];
+  for (const token of sanitizedTokens) {
+    if (resultsMap.has(token)) {
+      output.push(resultsMap.get(token));
+      continue;
+    }
+
+    const scrip = scripMasterManager.getByToken(token);
+    const cleanSym = scrip ? scrip.symbol.replace(/-EQ$/i, '') : token;
+    const baseInfo = STOCK_INFO_MAP[cleanSym];
+    const liveStock = tokenMap.get(token) || tokenMap.get(cleanSym);
+
+    const ltp = (liveStock && liveStock.ltp > 0) ? liveStock.ltp : (baseInfo?.ltp || 100.0);
+    const prevClose = (liveStock && liveStock.prevClose > 0) ? liveStock.prevClose : (baseInfo?.prevClose || ltp);
+    const change = Math.round((ltp - prevClose) * 100) / 100;
+    const changePercent = prevClose > 0 ? Math.round((change / prevClose) * 10000) / 100 : 0.0;
+
+    output.push({
+      token,
+      symbol: cleanSym,
+      tradingSymbol: scrip ? scrip.symbol : `${cleanSym}-EQ`,
+      name: scrip?.name || baseInfo?.name || cleanSym,
+      exchange: scrip?.exchange || exchange,
+      ltp,
+      previousClose: prevClose,
+      close: ltp,
+      open: prevClose,
+      high: Math.round(Math.max(ltp, prevClose) * 1.008 * 100) / 100,
+      low: Math.round(Math.min(ltp, prevClose) * 0.992 * 100) / 100,
+      change,
+      changePercent,
+      volume: liveStock?.volume || 0,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  return output;
+}
+
+/**
+ * GET /api/quotes
+ * Batch quotes for multiple tokens: /api/quotes?tokens=2885,1333,4963
+ */
+app.get(['/api/quotes', '/quotes'], async (req, res) => {
+  const tokensParam = req.query.tokens || req.query.symboltokens || req.query.symboltoken || '';
+  const tokens = typeof tokensParam === 'string' ? tokensParam.split(',').map(s => s.trim()).filter(Boolean) : (Array.isArray(tokensParam) ? tokensParam : []);
+  const exchange = (req.query.exchange || 'NSE').toString().toUpperCase();
+  const results = await handleBatchQuotes(tokens, exchange);
+  res.json({ status: true, count: results.length, data: results });
+});
+
+/**
+ * POST /api/quotes
+ * Batch quotes with JSON body: { tokens: ["2885", "1333", "4963"] }
+ */
+app.post(['/api/quotes', '/quotes'], async (req, res) => {
+  const bodyTokens = req.body.tokens || req.body.symboltokens || req.body.symbolTokens || [];
+  const tokens = Array.isArray(bodyTokens) ? bodyTokens : (typeof bodyTokens === 'string' ? bodyTokens.split(',').map(s => s.trim()).filter(Boolean) : []);
+  const exchange = (req.body.exchange || req.query.exchange || 'NSE').toString().toUpperCase();
+  const results = await handleBatchQuotes(tokens, exchange);
+  res.json({ status: true, count: results.length, data: results });
+});
+
+/**
  * GET /api/quote?symboltoken=TOKEN&exchange=NSE
  * Fetch real-time market quote with circuit limits and price statistics
  */
@@ -1119,6 +1264,13 @@ app.get(['/api/quote', '/quote'], async (req, res) => {
 
   if (!symbolToken) {
     return res.status(400).json({ status: false, error: 'Missing required parameter: symboltoken' });
+  }
+
+  // If multiple tokens are passed as comma-separated list, delegate to batch quotes
+  if (symbolToken.includes(',')) {
+    const tokens = symbolToken.split(',').map(s => s.trim()).filter(Boolean);
+    const results = await handleBatchQuotes(tokens, exchange);
+    return res.json({ status: true, count: results.length, data: results });
   }
 
   // 1. If Angel One is authenticated, try fetching live quote

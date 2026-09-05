@@ -701,7 +701,7 @@ class IndicesManager {
   /**
    * Get all constituent stocks for a given index with live market data
    */
-  getConstituents(nameOrId, scripMaster = null) {
+  getConstituents(nameOrId, scripMaster = null, tokenMap = null) {
     const indexDef = this.findNormalIndex(nameOrId);
     if (!indexDef) return null;
 
@@ -712,6 +712,8 @@ class IndicesManager {
       const baseInfo = STOCK_INFO_MAP[cleanSym] || {
         name: `${cleanSym} LTD`,
         token: '1000',
+        ltp: 100.0,
+        prevClose: 100.0,
         sector: 'Diversified'
       };
 
@@ -726,6 +728,16 @@ class IndicesManager {
         }
       }
 
+      // Check if tokenMap or liveStockCache has current live price
+      const liveStock = tokenMap ? (tokenMap.get(resolvedToken) || tokenMap.get(cleanSym)) : null;
+      const ltp = liveStock && liveStock.ltp > 0 ? liveStock.ltp : (baseInfo.ltp || 0.0);
+      const prevClose = liveStock && liveStock.prevClose > 0 ? liveStock.prevClose : (baseInfo.prevClose || ltp);
+      const change = (ltp > 0 && prevClose > 0) ? Math.round((ltp - prevClose) * 100) / 100 : 0.0;
+      const changePercent = (prevClose > 0 && change !== 0) ? Math.round((change / prevClose) * 10000) / 100 : 0.0;
+      const high = liveStock && liveStock.high > 0 ? liveStock.high : (ltp > 0 ? Math.round(Math.max(ltp, prevClose) * 1.008 * 100) / 100 : 0.0);
+      const low = liveStock && liveStock.low > 0 ? liveStock.low : (ltp > 0 ? Math.round(Math.min(ltp, prevClose) * 0.992 * 100) / 100 : 0.0);
+      const isLive = Boolean(liveStock && liveStock.ltp > 0);
+
       results.push({
         symbol: cleanSym,
         tradingSymbol: `${cleanSym}-EQ`,
@@ -733,17 +745,17 @@ class IndicesManager {
         token: resolvedToken,
         exchange: 'NSE',
         instrumentType: 'EQ',
-        ltp: 0.0,
-        change: 0.0,
-        changePercent: 0.0,
-        high: 0.0,
-        low: 0.0,
-        open: 0.0,
-        previousClose: 0.0,
-        volume: 0,
+        ltp: ltp,
+        change: change,
+        changePercent: changePercent,
+        high: high,
+        low: low,
+        open: prevClose,
+        previousClose: prevClose,
+        volume: liveStock && liveStock.volume ? liveStock.volume : 0,
         sector: baseInfo.sector,
-        isLive: false,
-        lastUpdated: null
+        isLive: isLive,
+        lastUpdated: liveStock && liveStock.timestamp ? liveStock.timestamp : Date.now()
       });
     }
 

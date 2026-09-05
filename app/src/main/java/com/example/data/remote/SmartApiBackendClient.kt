@@ -288,21 +288,12 @@ class SmartApiBackendClient {
     }
 
     private fun initializeSymbols() {
-        val initialList = listOf(
-            StockSymbol("NIFTY 50", "NIFTY 50 INDEX", "99926000", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("BANKNIFTY", "NIFTY BANK INDEX", "99926009", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("BEL", "Bharat Electronics Ltd", "383", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("RELIANCE", "Reliance Industries Ltd", "2885", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("HDFCBANK", "HDFC Bank Ltd", "1333", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("TCS", "Tata Consultancy Services", "11536", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("INFY", "Infosys Ltd", "1594", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("ICICIBANK", "ICICI Bank Ltd", "4963", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("TATAMOTORS", "Tata Motors Ltd", "3456", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("SBIN", "State Bank of India", "3045", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("ITC", "ITC Ltd", "1660", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("BHARTIARTL", "Bharti Airtel Ltd", "10604", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0),
-            StockSymbol("LT", "Larsen & Toubro Ltd", "11483", "NSE", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0L, 0.0)
+        val baseConstituents = IndicesDataProvider.getConstituentsForIndex("nifty-50")
+        val indexItems = listOf(
+            StockSymbol("NIFTY 50", "NIFTY 50 INDEX", "99926000", "NSE", 24350.0, 125.0, 0.52, 24225.0, 24410.0, 24190.0, 24350.0, 0L, 24225.0),
+            StockSymbol("BANKNIFTY", "NIFTY BANK INDEX", "99926009", "NSE", 51200.0, -140.0, -0.27, 51340.0, 51450.0, 51050.0, 51200.0, 0L, 51340.0)
         )
+        val initialList = (indexItems + baseConstituents).distinctBy { it.token }
         _marketSymbols.value = initialList
         initialList.forEach { registerScrip(it.symbol, it.token, it.exchange, it.name) }
     }
@@ -1051,6 +1042,109 @@ class SmartApiBackendClient {
     }
 
     /**
+     * Batch REST price fetcher: GET /api/quotes?tokens=...
+     * Splits into chunks of 40 tokens and updates internal marketSymbols.
+     */
+    suspend fun fetchQuotesBatch(tokens: List<String>, exchange: String = "NSE"): List<StockSymbol> = withContext(Dispatchers.IO) {
+        val sanitizedTokens = tokens.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (sanitizedTokens.isEmpty()) return@withContext emptyList()
+
+        val results = mutableListOf<StockSymbol>()
+        val chunks = sanitizedTokens.chunked(40)
+
+        for (chunk in chunks) {
+            val tokensParam = chunk.joinToString(",")
+            val targetUrl = "${backendConfig.apiBaseUrl}/api/quotes?tokens=$tokensParam&exchange=$exchange"
+
+            var chunkSuccess = false
+            try {
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .get()
+                    .build()
+
+                okHttpClient.newCall(request).execute().use { response ->
+                    val bodyStr = response.body?.string() ?: ""
+                    if (response.isSuccessful && bodyStr.isNotBlank()) {
+                        val json = JSONObject(bodyStr)
+                        if (json.optBoolean("status", false)) {
+                            val array = json.optJSONArray("data") ?: json.optJSONArray("quotes") ?: JSONArray()
+                            for (i in 0 until array.length()) {
+                                val item = array.optJSONObject(i) ?: continue
+                                val token = item.optString("token", item.optString("symbolToken", ""))
+                                val rawSymbol = item.optString("symbol", item.optString("tradingSymbol", ""))
+                                val cleanSym = rawSymbol.removeSuffix("-EQ").trim()
+                                val name = item.optString("name", cleanSym)
+                                val ltp = item.optDouble("ltp", 0.0)
+                                val prevClose = item.optDouble("previousClose", item.optDouble("prevClose", item.optDouble("close", ltp)))
+                                val change = item.optDouble("change", if (prevClose > 0.0 && ltp > 0.0) ltp - prevClose else 0.0)
+                                val changePct = item.optDouble("changePercent", if (prevClose > 0.0 && change != 0.0) (change / prevClose) * 100.0 else 0.0)
+                                val open = item.optDouble("open", prevClose)
+                                val high = item.optDouble("high", if (ltp > 0.0) maxOf(ltp, prevClose) else ltp)
+                                val low = item.optDouble("low", if (ltp > 0.0) minOf(ltp, prevClose) else ltp)
+                                val close = item.optDouble("close", ltp)
+                                val volume = item.optLong("volume", item.optLong("tradeVolume", 0L))
+
+                                if (token.isNotEmpty() && (ltp > 0.0 || prevClose > 0.0)) {
+                                    val stock = StockSymbol(
+                                        symbol = cleanSym.ifEmpty { "TOKEN_$token" },
+                                        name = name.ifEmpty { cleanSym },
+                                        token = token,
+                                        exchange = item.optString("exchange", exchange),
+                                        ltp = if (ltp > 0.0) ltp else prevClose,
+                                        change = kotlin.math.round(change * 100.0) / 100.0,
+                                        changePercent = kotlin.math.round(changePct * 100.0) / 100.0,
+                                        open = if (open > 0.0) open else prevClose,
+                                        high = if (high > 0.0) high else ltp,
+                                        low = if (low > 0.0) low else ltp,
+                                        close = if (close > 0.0) close else ltp,
+                                        volume = volume,
+                                        previousClose = if (prevClose > 0.0) prevClose else ltp,
+                                        lastUpdated = System.currentTimeMillis()
+                                    )
+                                    results.add(stock)
+                                    registerScrip(stock.symbol, stock.token, stock.exchange, stock.name)
+                                }
+                            }
+                            chunkSuccess = true
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "[BATCH QUOTE EXCEPTION] Batch fetch failed for chunk: ${e.message}")
+            }
+
+            // If the batch endpoint failed, fall back to individual fetchQuote concurrently for this chunk
+            if (!chunkSuccess) {
+                val individualResults = chunk.map { token ->
+                    async { fetchQuote(token, exchange) }
+                }.awaitAll().filterNotNull()
+                results.addAll(individualResults)
+            }
+        }
+
+        // Merge fetched batch into _marketSymbols to update state
+        if (results.isNotEmpty()) {
+            val currentList = _marketSymbols.value.toMutableList()
+            for (stock in results) {
+                val idx = currentList.indexOfFirst { it.token == stock.token || it.symbol.equals(stock.symbol, ignoreCase = true) }
+                if (idx >= 0) {
+                    currentList[idx] = stock
+                } else {
+                    currentList.add(stock)
+                }
+            }
+            _marketSymbols.value = currentList
+
+            // Also register subscriptions with WebSocket for dynamic tick updates
+            val tokensToSub = results.map { it.token }.filter { it.isNotEmpty() }
+            subscribeTokens(tokensToSub)
+        }
+
+        return@withContext results
+    }
+
+    /**
      * Calculates the valid trading session date range in IST (Asia/Kolkata)
      * for Angel One SmartAPI historical candle requests (fromdate to todate).
      * Supports Today, Yesterday, 2 Days Ago, and 5 Days historical sessions.
@@ -1485,29 +1579,48 @@ class SmartApiBackendClient {
                         val json = JSONObject(bodyStr)
                         val array = json.optJSONArray("constituents") ?: json.optJSONArray("data") ?: JSONArray()
                         val list = mutableListOf<StockSymbol>()
+                        val fallbackConstituents = IndicesDataProvider.getConstituentsForIndex(sanitized).associateBy { it.token }
 
                         for (i in 0 until array.length()) {
                             val item = array.optJSONObject(i) ?: continue
+                            val token = item.optString("token", "")
+                            val base = fallbackConstituents[token]
+                            val ltpRaw = item.optDouble("ltp", 0.0)
+                            val prevCloseRaw = item.optDouble("previousClose", item.optDouble("prevClose", 0.0))
+                            val ltp = if (ltpRaw > 0.0) ltpRaw else (base?.ltp ?: 0.0)
+                            val prevClose = if (prevCloseRaw > 0.0) prevCloseRaw else (base?.previousClose ?: ltp)
+                            val changeRaw = item.optDouble("change", 0.0)
+                            val change = if (changeRaw != 0.0) changeRaw else (if (prevClose > 0.0 && ltp > 0.0) ltp - prevClose else (base?.change ?: 0.0))
+                            val changePctRaw = item.optDouble("changePercent", 0.0)
+                            val changePct = if (changePctRaw != 0.0) changePctRaw else (if (prevClose > 0.0 && change != 0.0) (change / prevClose) * 100.0 else (base?.changePercent ?: 0.0))
+
                             list.add(
                                 StockSymbol(
-                                    symbol = item.optString("symbol", ""),
-                                    name = item.optString("name", item.optString("symbol", "")),
-                                    token = item.optString("token", ""),
+                                    symbol = item.optString("symbol", base?.symbol ?: ""),
+                                    name = item.optString("name", base?.name ?: item.optString("symbol", "")),
+                                    token = token,
                                     exchange = item.optString("exchange", "NSE"),
-                                    ltp = item.optDouble("ltp", 0.0),
-                                    change = item.optDouble("change", 0.0),
-                                    changePercent = item.optDouble("changePercent", 0.0),
-                                    open = item.optDouble("open", item.optDouble("ltp", 0.0)),
-                                    high = item.optDouble("high", item.optDouble("ltp", 0.0)),
-                                    low = item.optDouble("low", item.optDouble("ltp", 0.0)),
-                                    close = item.optDouble("ltp", 0.0),
-                                    volume = item.optLong("volume", 0L),
-                                    previousClose = item.optDouble("previousClose", item.optDouble("ltp", 0.0))
+                                    ltp = ltp,
+                                    change = kotlin.math.round(change * 100.0) / 100.0,
+                                    changePercent = kotlin.math.round(changePct * 100.0) / 100.0,
+                                    open = item.optDouble("open", base?.open ?: prevClose),
+                                    high = item.optDouble("high", base?.high ?: ltp),
+                                    low = item.optDouble("low", base?.low ?: ltp),
+                                    close = item.optDouble("close", ltp),
+                                    volume = item.optLong("volume", base?.volume ?: 0L),
+                                    previousClose = prevClose,
+                                    lastUpdated = System.currentTimeMillis()
                                 )
                             )
                         }
 
                         if (list.isNotEmpty()) {
+                            val tokens = list.map { it.token }.filter { it.isNotEmpty() }
+                            if (tokens.isNotEmpty()) {
+                                scope.launch {
+                                    fetchQuotesBatch(tokens)
+                                }
+                            }
                             return@withContext list
                         }
                     }
@@ -1517,6 +1630,13 @@ class SmartApiBackendClient {
             }
         }
 
-        return@withContext IndicesDataProvider.getConstituentsForIndex(sanitized)
+        val fallbackList = IndicesDataProvider.getConstituentsForIndex(sanitized)
+        val tokens = fallbackList.map { it.token }.filter { it.isNotEmpty() }
+        if (tokens.isNotEmpty()) {
+            scope.launch {
+                fetchQuotesBatch(tokens)
+            }
+        }
+        return@withContext fallbackList
     }
 }

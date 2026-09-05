@@ -40,6 +40,7 @@ fun MarketsScreen(
     onSelectIndex: (IndexItem) -> Unit = {},
     onToggleWatchlist: (String, String, String) -> Unit,
     onSearchScripMaster: (suspend (String) -> List<StockSearchResult>)? = null,
+    onFetchBatchQuotes: ((List<String>) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isLive = connectionStatus == ConnectionStatus.LIVE
@@ -47,6 +48,13 @@ fun MarketsScreen(
     var selectedIndexSubCategory by remember { mutableStateOf("ALL") }
     var scripMasterResults by remember { mutableStateOf<List<StockSearchResult>>(emptyList()) }
     var isSearchingScripMaster by remember { mutableStateOf(false) }
+
+    LaunchedEffect(symbols) {
+        val tokens = symbols.map { it.token }.filter { it.isNotBlank() }
+        if (tokens.isNotEmpty()) {
+            onFetchBatchQuotes?.invoke(tokens)
+        }
+    }
 
     val allIndices = if (indices.isNotEmpty()) indices else IndicesDataProvider.DEFAULT_INDICES
     val watchlistSymbols = remember(watchlist) { watchlist.map { it.symbol }.toSet() }
@@ -460,64 +468,62 @@ fun MarketsScreen(
                             modifier = Modifier.wrapContentWidth()
                         ) {
                             Column(horizontalAlignment = Alignment.End) {
+                                val fallbackBase = IndicesDataProvider.getBasePriceForStock(stock.token, stock.symbol)
                                 val displayPrice = when {
                                     stock.ltp > 0.0 -> stock.ltp
                                     stock.previousClose > 0.0 -> stock.previousClose
-                                    else -> 0.0
+                                    else -> fallbackBase.first
                                 }
                                 val priceLabel = when {
                                     isLive && stock.ltp > 0.0 -> "LIVE"
                                     stock.ltp > 0.0 -> "LAST AVAILABLE"
                                     stock.previousClose > 0.0 -> "PREV CLOSE"
-                                    else -> "UNAVAILABLE"
+                                    else -> "BASE"
                                 }
+                                val effectiveChange = when {
+                                    stock.change != 0.0 -> stock.change
+                                    stock.previousClose > 0.0 && stock.ltp > 0.0 -> stock.ltp - stock.previousClose
+                                    else -> fallbackBase.first - fallbackBase.second
+                                }
+                                val effectivePct = when {
+                                    stock.changePercent != 0.0 -> stock.changePercent
+                                    stock.previousClose > 0.0 && effectiveChange != 0.0 -> (effectiveChange / stock.previousClose) * 100.0
+                                    fallbackBase.second > 0.0 -> ((fallbackBase.first - fallbackBase.second) / fallbackBase.second) * 100.0
+                                    else -> 0.0
+                                }
+                                val effectiveIsPos = effectiveChange >= 0
                                 val formattedTime = formatMarketTimestamp(stock.lastUpdated)
 
-                                if (displayPrice > 0.0) {
+                                Text(
+                                    text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    color = if (effectiveIsPos) BullishGreen else BearishRed
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
                                     Text(
-                                        text = "₹${String.format(java.util.Locale.US, "%,.2f", displayPrice)}",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                        color = if (isLive) (if (isPos) BullishGreen else BearishRed) else TextPrimary
-                                    )
-                                    if (isLive) {
-                                        Text(
-                                            text = "${if (isPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", stock.changePercent)}%",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = if (isPos) BullishGreen else BearishRed
-                                        )
-                                    } else {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                            Text(
-                                                text = "$priceLabel • NOT LIVE",
-                                                fontSize = 8.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = KeyLevelYellow
-                                            )
-                                            if (formattedTime.isNotEmpty()) {
-                                                Text(
-                                                    text = "• $formattedTime",
-                                                    fontSize = 8.sp,
-                                                    color = TextTertiary
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Text(
-                                        text = "Price unavailable",
+                                        text = "${if (effectiveIsPos) "+" else ""}${String.format(java.util.Locale.US, "%.2f", effectivePct)}%",
                                         fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = TextTertiary
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (effectiveIsPos) BullishGreen else BearishRed
                                     )
                                     Text(
-                                        text = "LIVE DATA UNAVAILABLE",
+                                        text = if (isLive && stock.ltp > 0.0) "• LIVE" else "• $priceLabel",
                                         fontSize = 8.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = KeyLevelYellow
+                                        color = if (isLive && stock.ltp > 0.0) BullishGreen else KeyLevelYellow
                                     )
+                                    if (!isLive && formattedTime.isNotEmpty()) {
+                                        Text(
+                                            text = "• $formattedTime",
+                                            fontSize = 8.sp,
+                                            color = TextTertiary
+                                        )
+                                    }
                                 }
                             }
 
