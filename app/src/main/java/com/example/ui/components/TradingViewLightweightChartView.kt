@@ -202,6 +202,12 @@ private fun createTradingViewWebView(
                     )
                 }, 100)
             }
+
+            @Deprecated("Deprecated in Java")
+            override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
+                super.onReceivedError(view, errorCode, description, failingUrl)
+                android.util.Log.w("TradingViewChart", "WebView error: $errorCode - $description for $failingUrl")
+            }
         }
 
         addJavascriptInterface(

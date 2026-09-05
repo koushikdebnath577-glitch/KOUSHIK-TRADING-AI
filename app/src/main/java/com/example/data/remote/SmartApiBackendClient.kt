@@ -31,7 +31,7 @@ data class LiveTick(
 )
 
 data class BackendConfig(
-    val serverUrl: String = "https://koushik-trading-ai.onrender.com/api",
+    val serverUrl: String = "https://koushik-trading-ai.onrender.com",
     val wsUrl: String = "wss://koushik-trading-ai.onrender.com/ws/market",
     val isSimulated: Boolean = false,
     val isConnected: Boolean = true,
@@ -39,18 +39,17 @@ data class BackendConfig(
     val clientIp: String = "192.168.1.1",
     val macAddress: String = "00:1A:2B:3C:4D:5E"
 ) {
-    val apiBaseUrl: String
+    val serverRootUrl: String
         get() {
             val trimmed = serverUrl.trim().removeSuffix("/")
-            return if (trimmed.endsWith("/api")) trimmed else "$trimmed/api"
+            return if (trimmed.endsWith("/api")) trimmed.removeSuffix("/api") else trimmed
         }
 
+    val apiBaseUrl: String
+        get() = "$serverRootUrl/api"
+
     val healthUrl: String
-        get() {
-            val trimmed = serverUrl.trim().removeSuffix("/")
-            val root = if (trimmed.endsWith("/api")) trimmed.removeSuffix("/api") else trimmed
-            return "$root/health"
-        }
+        get() = "$serverRootUrl/health"
 }
 
 class SmartApiBackendClient {
@@ -75,20 +74,33 @@ class SmartApiBackendClient {
     private var backendConfig = BackendConfig()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // OkHttp Client with production timeouts (30s connect/read/write to accommodate Render cold starts)
-    private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
+    // REST HTTP Client with timeout configuration accommodating Render cold starts
+    private val restHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
-        .callTimeout(45, TimeUnit.SECONDS)
-        .pingInterval(20, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
+
+    // Dedicated WebSocket client: long-lived (callTimeout=0, readTimeout=0), keep-alive ping 15s, forced HTTP/1.1
+    private val wsHttpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
+        .protocols(listOf(Protocol.HTTP_1_1))
+        .retryOnConnectionFailure(true)
+        .build()
+
+    private val okHttpClient: OkHttpClient get() = restHttpClient
 
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
     private var quoteSyncJob: Job? = null
     private var isWebSocketActive = false
+    private var consecutiveReconnectFailures = 0
     private var lastTickReceivedAt: Long = 0L
 
     // In-memory cache of candle history per symbol + timeframe
@@ -153,9 +165,9 @@ class SmartApiBackendClient {
 
         try {
             // 1. Try GET /api/scrip?symbol=...
-            val scripUrl = "${backendConfig.apiBaseUrl}/api/scrip?symbol=${java.net.URLEncoder.encode(sym, "UTF-8")}"
+            val scripUrl = "${backendConfig.apiBaseUrl}/scrip?symbol=${java.net.URLEncoder.encode(sym, "UTF-8")}"
             val request = Request.Builder().url(scripUrl).get().build()
-            okHttpClient.newCall(request).execute().use { response ->
+            restHttpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     val body = response.body?.string()
                     if (!body.isNullOrBlank()) {
@@ -176,9 +188,9 @@ class SmartApiBackendClient {
             }
 
             // 2. Fallback to GET /api/search?q=...
-            val searchUrl = "${backendConfig.apiBaseUrl}/api/search?q=${java.net.URLEncoder.encode(sym, "UTF-8")}"
+            val searchUrl = "${backendConfig.apiBaseUrl}/search?q=${java.net.URLEncoder.encode(sym, "UTF-8")}"
             val searchReq = Request.Builder().url(searchUrl).get().build()
-            okHttpClient.newCall(searchReq).execute().use { response ->
+            restHttpClient.newCall(searchReq).execute().use { response ->
                 if (response.isSuccessful) {
                     val body = response.body?.string()
                     if (!body.isNullOrBlank()) {
@@ -332,11 +344,17 @@ class SmartApiBackendClient {
         _connectionStatus.value = ConnectionStatus.CONNECTING
         Log.i(TAG, "[CONNECT TO BACKEND]\nBACKEND URL: ${backendConfig.apiBaseUrl}\nHEALTH URL: ${backendConfig.healthUrl}\nWS URL: ${backendConfig.wsUrl}\nWebSocket connection state: ${_connectionStatus.value.label}")
 
-        // 1. Perform Health Check with retry
+        // 1. Perform Health Check with retry to verify backend is active
         val isHealthOk = performHealthCheck()
         Log.i(TAG, "[HEALTH CHECK RESULT] Health OK: $isHealthOk | HEALTH URL: ${backendConfig.healthUrl}")
 
-        // 2. Establish WebSocket connection
+        if (!isHealthOk) {
+            Log.w(TAG, "[BACKEND WARMUP] Backend health check has not succeeded yet. Retrying in 5s...")
+            scheduleAutomaticReconnect(5000L)
+            return
+        }
+
+        // 2. Establish WebSocket connection once backend is confirmed ready
         startWebSocket()
     }
 
@@ -345,8 +363,8 @@ class SmartApiBackendClient {
      */
     private suspend fun performHealthCheck(): Boolean = withContext(Dispatchers.IO) {
         val targetHealthUrl = backendConfig.healthUrl
-        val maxRetries = 4
-        val backoffDelays = listOf(0L, 2000L, 4000L, 6000L)
+        val maxRetries = 8
+        val backoffDelays = listOf(0L, 2000L, 3000L, 5000L, 6000L, 8000L, 10000L, 12000L)
 
         for (attempt in 1..maxRetries) {
             if (backoffDelays[attempt - 1] > 0L) {
@@ -362,7 +380,7 @@ class SmartApiBackendClient {
                     .get()
                     .build()
 
-                okHttpClient.newCall(request).execute().use { response ->
+                restHttpClient.newCall(request).execute().use { response ->
                     val code = response.code
                     val body = response.body?.string() ?: ""
 
@@ -382,17 +400,14 @@ class SmartApiBackendClient {
                     }
                 }
             } catch (e: Exception) {
-                Log.e(
+                Log.w(
                     TAG,
-                    "[HEALTH CHECK EXCEPTION] (Attempt $attempt/$maxRetries)\n" +
-                    "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
-                    "HEALTH URL: $targetHealthUrl\n" +
-                    "Error: ${e.javaClass.simpleName}: ${e.message}"
+                    "[HEALTH CHECK EXCEPTION] (Attempt $attempt/$maxRetries) Backend warming up: ${e.javaClass.simpleName}: ${e.message}"
                 )
             }
         }
 
-        Log.e(TAG, "All $maxRetries health check attempts failed. Backend may still be spinning up.")
+        Log.e(TAG, "All $maxRetries health check attempts timed out. Backend may still be spinning up.")
         false
     }
 
@@ -410,9 +425,10 @@ class SmartApiBackendClient {
                 .url(targetWsUrl)
                 .build()
 
-            webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+            webSocket = wsHttpClient.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     isWebSocketActive = true
+                    consecutiveReconnectFailures = 0
                     _connectionStatus.value = ConnectionStatus.CONNECTED_WAITING_FOR_TICK
                     Log.i(
                         "ANDROID WS CONNECT",
@@ -512,18 +528,20 @@ class SmartApiBackendClient {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Log.e(
+                    val isEof = t is java.io.EOFException
+                    val errDesc = if (isEof) "Connection closed/reset (EOFException)" else "${t.javaClass.simpleName}: ${t.message}"
+                    Log.w(
                         "ANDROID WS CONNECT",
-                        "[ANDROID WS CONNECT] Connection failed to $targetWsUrl | error: ${t.message} | HTTP response code: ${response?.code ?: "N/A"}"
+                        "[ANDROID WS CONNECT] Connection interrupted to $targetWsUrl | $errDesc | HTTP response code: ${response?.code ?: "N/A"}"
                     )
-                    Log.e(
+                    Log.w(
                         TAG,
                         "[WS FAILURE]\n" +
                         "BACKEND URL: ${backendConfig.apiBaseUrl}\n" +
                         "WebSocket URL: $targetWsUrl\n" +
                         "WebSocket connection state: ERROR\n" +
                         "HTTP response code: ${response?.code ?: "N/A"}\n" +
-                        "Error: ${t.javaClass.simpleName}: ${t.message}"
+                        "Error: $errDesc"
                     )
                     isWebSocketActive = false
                     _connectionStatus.value = ConnectionStatus.ERROR
@@ -833,12 +851,18 @@ class SmartApiBackendClient {
     /**
      * Automatically reconnects if backend or network drops
      */
-    private fun scheduleAutomaticReconnect() {
+    private fun scheduleAutomaticReconnect(delayMs: Long = 0L) {
         if (reconnectJob?.isActive == true) return
 
         reconnectJob = scope.launch {
-            Log.i(TAG, "[SCHEDULING RECONNECT] Will attempt reconnection in 3 seconds... (BACKEND URL: ${backendConfig.apiBaseUrl})")
-            delay(3000)
+            val waitTime = if (delayMs > 0L) {
+                delayMs
+            } else {
+                consecutiveReconnectFailures++
+                (consecutiveReconnectFailures * 3000L).coerceIn(3000L, 25000L)
+            }
+            Log.i(TAG, "[SCHEDULING RECONNECT] Will attempt reconnection in ${waitTime / 1000}s... (BACKEND URL: ${backendConfig.apiBaseUrl})")
+            delay(waitTime)
             if (!isWebSocketActive) {
                 _connectionStatus.value = ConnectionStatus.CONNECTING
                 connectToBackend()
@@ -913,7 +937,7 @@ class SmartApiBackendClient {
         val sanitizedToken = symbolToken.trim()
         if (sanitizedToken.isEmpty()) return@withContext null
 
-        val targetUrl = "${backendConfig.apiBaseUrl}/api/quote?symboltoken=$sanitizedToken&exchange=$exchange"
+        val targetUrl = "${backendConfig.apiBaseUrl}/quote?symboltoken=$sanitizedToken&exchange=$exchange"
         val maxRetries = 2
         val backoffDelays = listOf(0L, 1000L)
 
@@ -928,7 +952,7 @@ class SmartApiBackendClient {
                     .get()
                     .build()
 
-                okHttpClient.newCall(request).execute().use { response ->
+                restHttpClient.newCall(request).execute().use { response ->
                     val code = response.code
                     val bodyStr = response.body?.string() ?: ""
 
@@ -1054,7 +1078,7 @@ class SmartApiBackendClient {
 
         for (chunk in chunks) {
             val tokensParam = chunk.joinToString(",")
-            val targetUrl = "${backendConfig.apiBaseUrl}/api/quotes?tokens=$tokensParam&exchange=$exchange"
+            val targetUrl = "${backendConfig.apiBaseUrl}/quotes?tokens=$tokensParam&exchange=$exchange"
 
             var chunkSuccess = false
             try {
@@ -1063,7 +1087,7 @@ class SmartApiBackendClient {
                     .get()
                     .build()
 
-                okHttpClient.newCall(request).execute().use { response ->
+                restHttpClient.newCall(request).execute().use { response ->
                     val bodyStr = response.body?.string() ?: ""
                     if (response.isSuccessful && bodyStr.isNotBlank()) {
                         val json = JSONObject(bodyStr)
@@ -1291,7 +1315,7 @@ class SmartApiBackendClient {
         val encodedFrom = java.net.URLEncoder.encode(fromDateStr, "UTF-8")
         val encodedTo = java.net.URLEncoder.encode(toDateStr, "UTF-8")
 
-        val targetUrl = "${backendConfig.apiBaseUrl}/api/candles?symboltoken=$sanitizedToken&exchange=$exchange&interval=$intervalStr&fromdate=$encodedFrom&todate=$encodedTo&count=$count"
+        val targetUrl = "${backendConfig.apiBaseUrl}/candles?symboltoken=$sanitizedToken&exchange=$exchange&interval=$intervalStr&fromdate=$encodedFrom&todate=$encodedTo&count=$count"
         val maxRetries = 2
         val backoffDelays = listOf(0L, 1000L)
 
@@ -1306,7 +1330,7 @@ class SmartApiBackendClient {
                     .get()
                     .build()
 
-                okHttpClient.newCall(request).execute().use { response ->
+                restHttpClient.newCall(request).execute().use { response ->
                     val code = response.code
                     val bodyStr = response.body?.string() ?: ""
 
