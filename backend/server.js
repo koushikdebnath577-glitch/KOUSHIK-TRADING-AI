@@ -740,7 +740,9 @@ async function fetchAndBroadcastSingleQuote(token) {
 async function pollAngelOneQuotes() {
   if (!isAngelConfigured() || !authManager.isAuthenticated) return;
   try {
-    const tokens = ['99926000', '99926009', '99926037', '99926008', '99926004', '99926001', '99926002', '99926005', '99926006', '99926011', '99926018', '99926010', '99926013', '99926014', '2885', '1333', '11536', '1594', '3045'];
+    const baseTokens = ['99926000', '99926009', '99926037', '99926008', '99926004', '99926001', '99926002', '99926005', '99926006', '99926011', '99926018', '99926010', '99926013', '99926014', '383', '2885', '1333', '11536', '1594', '3045'];
+    const dynamicTokens = Array.from(upstreamMarketFeed.subscribedTokens);
+    const tokens = Array.from(new Set([...baseTokens, ...dynamicTokens]));
     const response = await axios.post(
       `${SMARTAPI_BASE_URL}/rest/secure/angelbroking/market/v1/quote/`,
       {
@@ -1031,7 +1033,7 @@ app.get('/api/indices/:indexName', (req, res) => {
  * Supports: Stock name, Trading symbol, Partial stock name, Partial trading symbol
  * Example: HDFC, RELIANCE, TATA, INFY, SBIN
  */
-app.get('/api/search', (req, res) => {
+app.get(['/api/search', '/search'], (req, res) => {
   try {
     const query = (req.query.q || req.query.query || '').toString().trim();
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
@@ -1239,15 +1241,22 @@ app.get(['/api/candles', '/candles'], async (req, res) => {
 
       if (response.data && response.data.status && Array.isArray(response.data.data)) {
         // Map SmartAPI array format [timestampStr, open, high, low, close, volume]
-        const formattedCandles = response.data.data.map(item => ({
-          timestamp: new Date(item[0]).getTime(),
-          open: item[1],
-          high: item[2],
-          low: item[3],
-          close: item[4],
-          volume: item[5],
-          isComplete: true
-        }));
+        const formattedCandles = response.data.data.map(item => {
+          let dateStr = String(item[0]).trim();
+          if (!dateStr.includes('+') && !dateStr.includes('Z')) {
+            dateStr = dateStr.replace(' ', 'T') + '+05:30';
+          }
+          const ts = new Date(dateStr).getTime();
+          return {
+            timestamp: isNaN(ts) ? new Date(item[0]).getTime() : ts,
+            open: Number(item[1]),
+            high: Number(item[2]),
+            low: Number(item[3]),
+            close: Number(item[4]),
+            volume: Number(item[5]) || 0,
+            isComplete: true
+          };
+        });
 
         return res.json({
           status: true,

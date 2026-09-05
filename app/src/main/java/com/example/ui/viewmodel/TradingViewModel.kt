@@ -19,8 +19,10 @@ data class TradingUiState(
     val selectedSymbol: String = "NIFTY 50",
     val selectedStock: StockSymbol? = null,
     val selectedTimeframe: Timeframe = Timeframe.MIN_1,
+    val selectedSession: TradingSession = TradingSession.TODAY,
     val selectedStrategy: StrategyType = StrategyType.RESISTANCE_REJECTION,
     val connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTING,
+    val diagnosticMessage: String? = null,
     val candles: List<Candle> = emptyList(),
     val keyLevels: List<KeyLevel> = emptyList(),
     val analysisResult: AnalysisResult? = null,
@@ -100,12 +102,27 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         viewModelScope.launch {
+            repository.selectedSession.collect { sess ->
+                _uiState.update { it.copy(selectedSession = sess) }
+            }
+        }
+        viewModelScope.launch {
+            repository.tokenResolutionDiagnostic.collect { diag ->
+                _uiState.update { it.copy(diagnosticMessage = diag) }
+            }
+        }
+        viewModelScope.launch {
             combine(
                 repository.selectedSymbol,
                 repository.marketSymbols,
                 repository.indices
             ) { currentSym, symbols, indicesList ->
-                val stockFromMarket = symbols.find { it.symbol.equals(currentSym, ignoreCase = true) }
+                val clean = currentSym.trim().uppercase().removeSuffix("-EQ")
+                val stockFromMarket = symbols.find {
+                    it.symbol.equals(currentSym, ignoreCase = true) ||
+                    it.symbol.equals(clean, ignoreCase = true) ||
+                    it.name.equals(currentSym, ignoreCase = true)
+                }
                 val stock = if (stockFromMarket != null && stockFromMarket.ltp > 0.0) {
                     stockFromMarket
                 } else {
@@ -255,6 +272,11 @@ class TradingViewModel(application: Application) : AndroidViewModel(application)
     fun selectTimeframe(timeframe: Timeframe) {
         repository.selectTimeframe(timeframe)
         _uiState.update { it.copy(selectedTimeframe = timeframe) }
+    }
+
+    fun selectTradingSession(session: TradingSession) {
+        repository.selectTradingSession(session)
+        _uiState.update { it.copy(selectedSession = session) }
     }
 
     fun selectStrategy(strategy: StrategyType) {

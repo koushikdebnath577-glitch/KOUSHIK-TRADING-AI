@@ -33,6 +33,15 @@ class TradingRepository(
     private val _selectedTimeframe = MutableStateFlow(Timeframe.MIN_1)
     val selectedTimeframe: StateFlow<Timeframe> = _selectedTimeframe.asStateFlow()
 
+    private val _selectedSession = MutableStateFlow(TradingSession.TODAY)
+    val selectedSession: StateFlow<TradingSession> = _selectedSession.asStateFlow()
+
+    private val _selectedToken = MutableStateFlow("")
+    val selectedToken: StateFlow<String> = _selectedToken.asStateFlow()
+
+    private val _tokenResolutionDiagnostic = MutableStateFlow<String?>(null)
+    val tokenResolutionDiagnostic: StateFlow<String?> = _tokenResolutionDiagnostic.asStateFlow()
+
     private val _selectedStrategy = MutableStateFlow(StrategyType.RESISTANCE_REJECTION)
     val selectedStrategy: StateFlow<StrategyType> = _selectedStrategy.asStateFlow()
 
@@ -213,17 +222,39 @@ class TradingRepository(
         val showAnalysisMarkers: Boolean = true
     )
 
+    fun selectTradingSession(session: TradingSession) {
+        if (_selectedSession.value == session) return
+        _selectedSession.value = session
+        loadCandlesForSelected()
+    }
+
+    private fun isIndexToken(token: String): Boolean {
+        return token.startsWith("99926")
+    }
+
     fun selectSymbol(symbol: String) {
         val trimmed = symbol.trim()
+        val prevToken = _selectedToken.value
         _selectedSymbol.value = trimmed
+        _tokenResolutionDiagnostic.value = null
         android.util.Log.i("SELECTED_STOCK", "[SELECTED_STOCK] symbol: $trimmed")
 
         scope.launch {
             val (token, exchange) = resolveInstrumentInfoAsync(trimmed)
+            _selectedToken.value = token
             android.util.Log.i("TOKEN_RESOLVED", "[TOKEN_RESOLVED] symbol: $trimmed | token: $token | exchange: $exchange")
+
             if (token.isNotEmpty()) {
                 smartApiClient.registerScrip(trimmed, token, exchange)
+                // Unsubscribe previous selected stock token if different and not an index
+                if (prevToken.isNotEmpty() && prevToken != token && !isIndexToken(prevToken)) {
+                    smartApiClient.unsubscribeToken(prevToken)
+                }
                 smartApiClient.subscribeToken(token)
+                _tokenResolutionDiagnostic.value = null
+            } else {
+                _tokenResolutionDiagnostic.value = "Token unresolvable for '$trimmed' in Angel One Scrip Master"
+                android.util.Log.w("TOKEN_RESOLVED", "[TOKEN_UNRESOLVED] Failed to resolve token for: $trimmed in Angel One Scrip Master")
             }
             loadCandlesForSelected()
 
@@ -236,16 +267,18 @@ class TradingRepository(
                     val quote = smartApiClient.fetchQuote(token, exchange)
                     if (quote != null && quote.ltp > 0.0) {
                         val agg = aggregator
-                        val updatedCandle = agg?.injectCurrentSessionLtp(quote.ltp, quote.volume)
-                        if (updatedCandle != null) {
-                            _activeCandles.value = agg.candles
-                            android.util.Log.i(
-                                "CHART_CANDLE_UPDATE",
-                                "[CHART_CANDLE_UPDATE] symbol: $trimmed | token: $token | candleClose: ${updatedCandle.close} | totalCandles: ${agg.candles.size} | isComplete: false | source=REST_QUOTE_FALLBACK"
-                            )
-                            val prevClose = quote.previousClose.takeIf { it > 0.0 } ?: quote.ltp
-                            _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, quote.ltp, prevClose)
-                            recomputeAnalysis()
+                        if (_selectedSession.value == TradingSession.TODAY) {
+                            val updatedCandle = agg?.injectCurrentSessionLtp(quote.ltp, quote.volume)
+                            if (updatedCandle != null) {
+                                _activeCandles.value = agg.candles
+                                android.util.Log.i(
+                                    "CHART_CANDLE_UPDATE",
+                                    "[CHART_CANDLE_UPDATE] symbol: $trimmed | token: $token | candleClose: ${updatedCandle.close} | totalCandles: ${agg.candles.size} | isComplete: false | source=REST_QUOTE_FALLBACK"
+                                )
+                                val prevClose = quote.previousClose.takeIf { it > 0.0 } ?: quote.ltp
+                                _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, quote.ltp, prevClose)
+                                recomputeAnalysis()
+                            }
                         }
                     }
                 }
@@ -381,33 +414,41 @@ class TradingRepository(
     private fun loadCandlesForSelected() {
         val symbol = _selectedSymbol.value
         val tf = _selectedTimeframe.value
+        val session = _selectedSession.value
         val (token, exch) = resolveInstrumentInfo(symbol)
 
-        // Show cached candles immediately if available for fast UI responsiveness
-        val cachedCandles = smartApiClient.getHistoricalCandles(symbol, tf)
-        if (cachedCandles.isNotEmpty()) {
-            val agg = CandleAggregator(tf, cachedCandles)
-            val currentLtp = getLtpForInstrument(symbol) ?: cachedCandles.last().close
-            val prevClose = getPrevCloseForInstrument(symbol) ?: currentLtp
-            if (currentLtp > 0.0) {
-                agg.injectCurrentSessionLtp(currentLtp)
+        // Show cached candles immediately if available for fast UI responsiveness (only for current session)
+        if (session == TradingSession.TODAY) {
+            val cachedCandles = smartApiClient.getHistoricalCandles(symbol, tf)
+            if (cachedCandles.isNotEmpty()) {
+                val agg = CandleAggregator(tf, cachedCandles)
+                val currentLtp = getLtpForInstrument(symbol) ?: cachedCandles.last().close
+                val prevClose = getPrevCloseForInstrument(symbol) ?: currentLtp
+                if (currentLtp > 0.0) {
+                    agg.injectCurrentSessionLtp(currentLtp)
+                }
+                aggregator = agg
+                _activeCandles.value = agg.candles
+                _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, currentLtp, prevClose)
+                recomputeAnalysis()
             }
-            aggregator = agg
-            _activeCandles.value = agg.candles
-            _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, currentLtp, prevClose)
-            recomputeAnalysis()
         }
 
         // Asynchronously fetch fresh, authentic session candles from backend /api/candles
         scope.launch {
             val targetToken = if (token.isNotEmpty()) token else resolveInstrumentInfoAsync(symbol).first
             if (targetToken.isNotEmpty()) {
-                val fetchedCandles = smartApiClient.fetchCandles(targetToken, exch, tf)
+                val fetchedCandles = smartApiClient.fetchCandles(
+                    symbolToken = targetToken,
+                    exchange = exch,
+                    timeframe = tf,
+                    session = session
+                )
                 if (fetchedCandles.isNotEmpty()) {
                     val agg = CandleAggregator(tf, fetchedCandles)
                     val currentLtp = getLtpForInstrument(symbol) ?: fetchedCandles.last().close
                     val prevClose = getPrevCloseForInstrument(symbol) ?: currentLtp
-                    if (currentLtp > 0.0) {
+                    if (currentLtp > 0.0 && session == TradingSession.TODAY) {
                         val injected = agg.injectCurrentSessionLtp(currentLtp)
                         if (injected != null) {
                             android.util.Log.i(
@@ -420,7 +461,13 @@ class TradingRepository(
                     _activeCandles.value = agg.candles
                     _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, currentLtp, prevClose)
                     recomputeAnalysis()
-                } else if (cachedCandles.isEmpty()) {
+                } else if (session == TradingSession.TODAY) {
+                    val cached = smartApiClient.getHistoricalCandles(symbol, tf)
+                    if (cached.isEmpty()) {
+                        _activeCandles.value = emptyList()
+                        recomputeAnalysis()
+                    }
+                } else {
                     _activeCandles.value = emptyList()
                     recomputeAnalysis()
                 }
@@ -431,7 +478,7 @@ class TradingRepository(
     private fun handleLiveTick(tick: LiveTick) {
         val receivedAt = System.currentTimeMillis()
         lastTickTimes[tick.token] = receivedAt
-        android.util.Log.i("REPOSITORY_LIVE_TICK", "[REPOSITORY_LIVE_TICK] token: ${tick.token} | symbol: ${tick.symbol} | ltp: ${tick.ltp} | exchangeTimestamp: ${tick.timestamp} | receivedAt: $receivedAt")
+        android.util.Log.i("REPOSITORY_LIVE_TICK", "[REPOSITORY_LIVE_TICK] token: ${tick.token} | symbol: ${tick.symbol} | ltp: ${tick.ltp}")
 
         // 1. Update index state if this tick belongs to an index
         val currentIndices = _indices.value.toMutableList()
@@ -464,7 +511,7 @@ class TradingRepository(
         }
 
         // 2. Check if this tick matches the currently selected chart symbol
-        val selectedToken = resolveInstrumentInfo(_selectedSymbol.value).first
+        val selectedToken = _selectedToken.value.ifEmpty { resolveInstrumentInfo(_selectedSymbol.value).first }
         val isSelected = (selectedToken.isNotEmpty() && tick.token == selectedToken) ||
             tick.symbol.equals(_selectedSymbol.value, ignoreCase = true) ||
             tick.symbol.equals(_selectedSymbol.value.removeSuffix("-EQ"), ignoreCase = true) ||
@@ -486,40 +533,43 @@ class TradingRepository(
             // Instantly toggle live state to true, which removes the 'NOT LIVE' badge on the chart!
             smartApiClient.markLive()
 
-            var agg = aggregator
-            if (agg == null) {
-                val initialCandles = if (_activeCandles.value.isNotEmpty()) {
-                    _activeCandles.value
-                } else {
-                    listOf(
-                        Candle(
-                            timestamp = tick.timestamp,
-                            open = tick.ltp,
-                            high = tick.ltp,
-                            low = tick.ltp,
-                            close = tick.ltp,
-                            volume = tick.volume,
-                            isComplete = false
+            // Only update active chart candles from live ticks if user is viewing today's live session
+            if (_selectedSession.value == TradingSession.TODAY) {
+                var agg = aggregator
+                if (agg == null) {
+                    val initialCandles = if (_activeCandles.value.isNotEmpty()) {
+                        _activeCandles.value
+                    } else {
+                        listOf(
+                            Candle(
+                                timestamp = tick.timestamp,
+                                open = tick.ltp,
+                                high = tick.ltp,
+                                low = tick.ltp,
+                                close = tick.ltp,
+                                volume = tick.volume,
+                                isComplete = false
+                            )
                         )
-                    )
+                    }
+                    agg = CandleAggregator(_selectedTimeframe.value, initialCandles)
+                    aggregator = agg
                 }
-                agg = CandleAggregator(_selectedTimeframe.value, initialCandles)
-                aggregator = agg
+
+                val updatedCandle = agg.processTick(tick)
+                _activeCandles.value = agg.candles
+                android.util.Log.i(
+                    "CHART_CANDLE_UPDATE",
+                    "[CHART_CANDLE_UPDATE] symbol: ${_selectedSymbol.value} | token: ${tick.token} | candleClose: ${updatedCandle.close} | totalCandles: ${agg.candles.size} | isComplete: ${updatedCandle.isComplete}"
+                )
+
+                // Refresh key levels and analysis
+                val stock = marketSymbols.value.find { it.symbol.equals(_selectedSymbol.value, ignoreCase = true) }
+                val prevClose = stock?.previousClose ?: getPrevCloseForInstrument(_selectedSymbol.value) ?: tick.ltp
+                _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, tick.ltp, prevClose)
+
+                recomputeAnalysis()
             }
-
-            val updatedCandle = agg.processTick(tick)
-            _activeCandles.value = agg.candles
-            android.util.Log.i(
-                "CHART_CANDLE_UPDATE",
-                "[CHART_CANDLE_UPDATE] symbol: ${_selectedSymbol.value} | token: ${tick.token} | candleClose: ${updatedCandle.close} | totalCandles: ${agg.candles.size} | isComplete: ${updatedCandle.isComplete}"
-            )
-
-            // Refresh key levels and analysis
-            val stock = marketSymbols.value.find { it.symbol.equals(_selectedSymbol.value, ignoreCase = true) }
-            val prevClose = stock?.previousClose ?: getPrevCloseForInstrument(_selectedSymbol.value) ?: tick.ltp
-            _keyLevels.value = KeyLevelDetector.detectKeyLevels(agg.candles, tick.ltp, prevClose)
-
-            recomputeAnalysis()
         }
     }
 

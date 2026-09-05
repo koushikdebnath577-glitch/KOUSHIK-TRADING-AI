@@ -43,6 +43,7 @@ import com.example.data.model.Candle
 import com.example.data.model.ConnectionStatus
 import com.example.data.model.KeyLevel
 import com.example.data.model.Timeframe
+import com.example.data.model.TradingSession
 import com.example.data.repository.TradingRepository
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
@@ -106,6 +107,9 @@ fun TradingViewChart(
     selectedTimeframe: Timeframe,
     onTimeframeSelected: (Timeframe) -> Unit,
     onToggleIndicator: (String) -> Unit,
+    selectedSession: TradingSession = TradingSession.TODAY,
+    onSessionSelected: (TradingSession) -> Unit = {},
+    diagnosticMessage: String? = null,
     connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTING,
     lastUpdatedTimestamp: Long = 0L,
     modifier: Modifier = Modifier
@@ -138,6 +142,9 @@ fun TradingViewChart(
                     selectedTimeframe = selectedTimeframe,
                     onTimeframeSelected = onTimeframeSelected,
                     onToggleIndicator = onToggleIndicator,
+                    selectedSession = selectedSession,
+                    onSessionSelected = onSessionSelected,
+                    diagnosticMessage = diagnosticMessage,
                     connectionStatus = connectionStatus,
                     lastUpdatedTimestamp = lastUpdatedTimestamp,
                     isFullscreen = true,
@@ -160,6 +167,9 @@ fun TradingViewChart(
             selectedTimeframe = selectedTimeframe,
             onTimeframeSelected = onTimeframeSelected,
             onToggleIndicator = onToggleIndicator,
+            selectedSession = selectedSession,
+            onSessionSelected = onSessionSelected,
+            diagnosticMessage = diagnosticMessage,
             connectionStatus = connectionStatus,
             lastUpdatedTimestamp = lastUpdatedTimestamp,
             isFullscreen = false,
@@ -184,6 +194,9 @@ private fun ChartCoreContent(
     selectedTimeframe: Timeframe,
     onTimeframeSelected: (Timeframe) -> Unit,
     onToggleIndicator: (String) -> Unit,
+    selectedSession: TradingSession,
+    onSessionSelected: (TradingSession) -> Unit,
+    diagnosticMessage: String?,
     connectionStatus: ConnectionStatus,
     lastUpdatedTimestamp: Long,
     isFullscreen: Boolean,
@@ -246,10 +259,15 @@ private fun ChartCoreContent(
             )
             .testTag("candlestick_chart_container")
     ) {
+        val effectivePrice = if (currentLtp > 0.0) currentLtp else (candles.lastOrNull()?.close ?: 0.0)
+
         // Chart Header Toolbar: Title, Fullscreen, Tool Actions
         ChartHeaderBar(
             symbol = analysisResult?.symbol ?: "CHART",
             currentLtp = currentLtp,
+            effectivePrice = effectivePrice,
+            selectedSession = selectedSession,
+            diagnosticMessage = diagnosticMessage,
             connectionStatus = connectionStatus,
             lastUpdatedTimestamp = lastUpdatedTimestamp,
             isFullscreen = isFullscreen,
@@ -302,7 +320,9 @@ private fun ChartCoreContent(
                 onTimeframeSelected(it)
                 scrollOffset = 0
                 autoFollow = true
-            }
+            },
+            selectedSession = selectedSession,
+            onSessionSelected = onSessionSelected
         )
 
         // Indicators Toggle Strip
@@ -1145,6 +1165,9 @@ private fun ChartCoreContent(
 private fun ChartHeaderBar(
     symbol: String,
     currentLtp: Double,
+    effectivePrice: Double = currentLtp,
+    selectedSession: TradingSession = TradingSession.TODAY,
+    diagnosticMessage: String? = null,
     connectionStatus: ConnectionStatus,
     lastUpdatedTimestamp: Long,
     isFullscreen: Boolean,
@@ -1179,27 +1202,42 @@ private fun ChartHeaderBar(
                 color = TextPrimary,
                 maxLines = 1
             )
-            if (currentLtp > 0.0) {
+            val priceToShow = if (currentLtp > 0.0) currentLtp else effectivePrice
+            if (priceToShow > 0.0) {
                 Text(
-                    text = "₹${String.format(Locale.US, "%,.2f", currentLtp)}",
+                    text = "₹${String.format(Locale.US, "%,.2f", priceToShow)}",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    color = if (isLive) CyanAccent else TextSecondary,
+                    color = if (isLive && currentLtp > 0.0) CyanAccent else TextSecondary,
                     maxLines = 1
                 )
                 Surface(
                     shape = RoundedCornerShape(3.dp),
-                    color = if (isLive) BullishGreenBg else KeyLevelYellowBg
+                    color = if (isLive && currentLtp > 0.0 && selectedSession == TradingSession.TODAY) BullishGreenBg else KeyLevelYellowBg
                 ) {
+                    val badgeLabel = when {
+                        selectedSession != TradingSession.TODAY -> selectedSession.displayName.uppercase()
+                        isLive && currentLtp > 0.0 -> "LIVE"
+                        currentLtp > 0.0 -> "NOT LIVE"
+                        else -> "CLOSE"
+                    }
                     Text(
-                        text = if (isLive) "LIVE" else "NOT LIVE",
+                        text = badgeLabel,
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isLive) BullishGreen else KeyLevelYellow,
+                        color = if (isLive && currentLtp > 0.0 && selectedSession == TradingSession.TODAY) BullishGreen else KeyLevelYellow,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                     )
                 }
+            } else if (diagnosticMessage != null) {
+                Text(
+                    text = diagnosticMessage,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = BearishRed,
+                    maxLines = 1
+                )
             } else {
                 Text(
                     text = "Price unavailable",
@@ -1466,7 +1504,9 @@ private fun MeasurementOverlayHUD(
 @Composable
 private fun TimeframeSelectorBar(
     selectedTimeframe: Timeframe,
-    onTimeframeSelected: (Timeframe) -> Unit
+    onTimeframeSelected: (Timeframe) -> Unit,
+    selectedSession: TradingSession = TradingSession.TODAY,
+    onSessionSelected: (TradingSession) -> Unit = {}
 ) {
     LazyRow(
         modifier = Modifier
@@ -1475,6 +1515,43 @@ private fun TimeframeSelectorBar(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Trading session selector chips
+        items(TradingSession.values()) { sess ->
+            val isSelected = sess == selectedSession
+            Surface(
+                onClick = { onSessionSelected(sess) },
+                shape = RoundedCornerShape(12.dp),
+                color = if (isSelected) PurpleAccent.copy(alpha = 0.25f) else BgPillInactive,
+                contentColor = if (isSelected) PurpleAccent else TextSecondary,
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) PurpleAccent else BgCardBorder),
+                modifier = Modifier
+                    .height(26.dp)
+                    .testTag("session_button_${sess.name}")
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                ) {
+                    Text(
+                        text = sess.displayName,
+                        fontSize = 10.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        item {
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 2.dp)
+                    .width(1.dp)
+                    .height(16.dp)
+                    .background(BgCardBorder)
+            )
+        }
+
+        // Timeframe chips
         items(Timeframe.values()) { tf ->
             val isSelected = tf == selectedTimeframe
             val isSubSec = tf.isSubMinute

@@ -31,6 +31,15 @@ enum class Timeframe(val label: String, val seconds: Long, val isSubMinute: Bool
     DAY_1("1d", 86400L, false)
 }
 
+enum class TradingSession(val label: String, val offsetTradingDays: Int) {
+    TODAY("Today", 0),
+    YESTERDAY("Yesterday", 1),
+    PREV_DAY("2 Days Ago", 2),
+    FIVE_DAYS("5 Days", 5);
+
+    val displayName: String get() = label
+}
+
 data class StockSymbol(
     val symbol: String,
     val name: String,

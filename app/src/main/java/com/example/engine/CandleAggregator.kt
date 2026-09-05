@@ -42,8 +42,9 @@ class CandleAggregator(
         val lastIndex = _candles.size - 1
         val lastCandle = _candles[lastIndex]
         val candleBucketStart = (tickTime / intervalMillis) * intervalMillis
+        val lastCandleBucket = (lastCandle.timestamp / intervalMillis) * intervalMillis
 
-        return if (candleBucketStart == lastCandle.timestamp) {
+        return if (candleBucketStart == lastCandleBucket) {
             // Update existing forming candle
             val updated = lastCandle.copy(
                 high = max(lastCandle.high, tickPrice),
@@ -54,7 +55,7 @@ class CandleAggregator(
             )
             _candles[lastIndex] = updated
             updated
-        } else if (candleBucketStart > lastCandle.timestamp) {
+        } else if (candleBucketStart > lastCandleBucket) {
             // Check if last candle belongs to the same trading day / session
             val isSameSession = isSameTradingDay(lastCandle.timestamp, tickTime)
             _candles[lastIndex] = lastCandle.copy(isComplete = true)
@@ -84,8 +85,8 @@ class CandleAggregator(
      * Injects the current LTP into the latest candle ONLY if it belongs to the current trading session.
      * Never alters or pollutes previous session/historical candles.
      */
-    fun injectCurrentSessionLtp(ltp: Double, volume: Long = 0L): Candle? {
-        if (_candles.isEmpty() || ltp <= 0.0) return null
+    fun injectCurrentSessionLtp(ltp: Double, volume: Long = 0L, isHistoricalSession: Boolean = false): Candle? {
+        if (_candles.isEmpty() || ltp <= 0.0 || isHistoricalSession) return null
         val lastIndex = _candles.size - 1
         val lastCandle = _candles[lastIndex]
 

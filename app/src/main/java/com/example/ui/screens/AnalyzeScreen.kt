@@ -36,6 +36,9 @@ fun AnalyzeScreen(
     rsi: List<Double?>,
     indicatorSettings: TradingRepository.IndicatorSettings,
     selectedTimeframe: Timeframe,
+    selectedSession: TradingSession = TradingSession.TODAY,
+    onSessionSelected: (TradingSession) -> Unit = {},
+    diagnosticMessage: String? = null,
     selectedStrategy: StrategyType,
     defaultRiskAmount: Double = 2500.0,
     onTimeframeSelected: (Timeframe) -> Unit,
@@ -47,9 +50,11 @@ fun AnalyzeScreen(
     modifier: Modifier = Modifier
 ) {
     val currentLtp = stock?.ltp ?: 0.0
+    val displayLtp = if (currentLtp > 0.0) currentLtp else (candles.lastOrNull()?.close ?: 0.0)
     val prevClose = stock?.previousClose ?: 0.0
-    val change = stock?.change ?: 0.0
-    val changePercent = stock?.changePercent ?: 0.0
+    val displayPrevClose = if (prevClose > 0.0) prevClose else displayLtp
+    val change = stock?.change ?: if (displayPrevClose > 0 && displayLtp > 0) (displayLtp - displayPrevClose) else 0.0
+    val changePercent = stock?.changePercent ?: if (displayPrevClose > 0 && displayLtp > 0) ((displayLtp - displayPrevClose) / displayPrevClose) * 100.0 else 0.0
     val lastUpdated = stock?.lastUpdated ?: 0L
 
     LazyColumn(
@@ -64,10 +69,10 @@ fun AnalyzeScreen(
             ConnectionStatusHeader(
                 status = connectionStatus,
                 selectedSymbol = selectedSymbol,
-                ltp = currentLtp,
+                ltp = displayLtp,
                 change = change,
                 changePercent = changePercent,
-                previousClose = prevClose,
+                previousClose = displayPrevClose,
                 lastUpdatedTimestamp = lastUpdated,
                 onReconnectClick = onReconnect
             )
@@ -192,6 +197,9 @@ fun AnalyzeScreen(
                 selectedTimeframe = selectedTimeframe,
                 onTimeframeSelected = onTimeframeSelected,
                 onToggleIndicator = onToggleIndicator,
+                selectedSession = selectedSession,
+                onSessionSelected = onSessionSelected,
+                diagnosticMessage = diagnosticMessage,
                 connectionStatus = connectionStatus,
                 lastUpdatedTimestamp = lastUpdated
             )

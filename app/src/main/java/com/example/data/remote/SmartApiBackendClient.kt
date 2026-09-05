@@ -7,6 +7,7 @@ import com.example.data.model.IndexItem
 import com.example.data.model.StockSymbol
 import com.example.data.model.StockSearchResult
 import com.example.data.model.Timeframe
+import com.example.data.model.TradingSession
 import com.example.data.repository.IndicesDataProvider
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -109,6 +110,31 @@ class SmartApiBackendClient {
         dynamicScripRegistry[clean] = Pair(token, exchange)
         dynamicScripRegistry[raw] = Pair(token, exchange)
         dynamicTokenToSymbol[token] = clean
+
+        // Ensure stock exists in _marketSymbols immediately so all UI screens can observe it
+        val currentList = _marketSymbols.value.toMutableList()
+        val existingIndex = currentList.indexOfFirst { it.token == token || it.symbol.equals(clean, ignoreCase = true) }
+        if (existingIndex < 0) {
+            val displayName = if (name.isNotBlank()) name else clean
+            val newStock = StockSymbol(
+                symbol = clean,
+                name = displayName,
+                token = token,
+                exchange = exchange,
+                ltp = 0.0,
+                change = 0.0,
+                changePercent = 0.0,
+                open = 0.0,
+                high = 0.0,
+                low = 0.0,
+                close = 0.0,
+                volume = 0L,
+                previousClose = 0.0,
+                lastUpdated = 0L
+            )
+            currentList.add(newStock)
+            _marketSymbols.value = currentList
+        }
     }
 
     fun getRegisteredScrip(symbol: String): Pair<String, String>? {
@@ -214,6 +240,31 @@ class SmartApiBackendClient {
                 fetchQuote(t)
             }
         }
+    }
+
+    fun unsubscribeToken(token: String) {
+        if (token.isBlank()) return
+        unsubscribeTokens(listOf(token))
+    }
+
+    fun unsubscribeTokens(tokens: List<String>) {
+        val cleanTokens = tokens.map { it.trim() }.filter { it.isNotEmpty() }
+        if (cleanTokens.isEmpty()) return
+
+        cleanTokens.forEach { dynamicSubscribedTokens.remove(it) }
+
+        val tokensJson = JSONArray()
+        cleanTokens.forEach { tokensJson.put(it) }
+
+        val unsubPayload = JSONObject().apply {
+            put("action", "unsubscribe")
+            put("tokens", tokensJson)
+        }
+        val payloadStr = unsubPayload.toString()
+
+        val ws = webSocket
+        val sent = ws?.send(payloadStr) ?: false
+        Log.i("DYNAMIC_UNSUBSCRIBE", "[DYNAMIC_UNSUBSCRIBE] Sent WebSocket unsubscribe payload: $payloadStr | success: $sent")
     }
 
     init {
@@ -692,6 +743,7 @@ class SmartApiBackendClient {
         Log.i("ANGELONE_RAW_TICK", "[ANGELONE_RAW_TICK] Token: $token | Symbol: $symbol | Raw Angel LTP: $angelOneLtp | Volume: $volume | Timestamp: $timestamp")
         Log.i("BACKEND_FORWARD", "[BACKEND_FORWARD] Token: $token | Symbol: $symbol | Forwarded LTP: $backendForwardedLtp | Timestamp: $timestamp")
         Log.i("ANDROID_RECEIVED", "[ANDROID_RECEIVED] Status: LIVE | Symbol: $symbol | Token: $token | LTP: $ltp | Timestamp: $timestamp")
+        Log.i("ANDROID_TICK_PARSED", "[ANDROID_TICK_PARSED] token: $token | symbol: $symbol | ltp: $ltp | volume: $volume | timestamp: $timestamp")
         Log.i(
             "LIVE DATA",
             "[LIVE DATA]\ntoken: $token\nsymbol: $symbol\nltp: $ltp\nexchangeTimestamp: $timestamp\nreceivedAt: $lastTickReceivedAt\nsource=ANGEL_ONE"
@@ -702,19 +754,6 @@ class SmartApiBackendClient {
         )
 
         updateSymbolFromTick(token, symbol, ltp, change, changePercent, volume, timestamp)
-
-        // Emit live tick for indices, stocks, and charts
-        scope.launch {
-            _tickFlow.emit(
-                LiveTick(
-                    token = token,
-                    symbol = symbol,
-                    ltp = ltp,
-                    volume = volume,
-                    timestamp = timestamp
-                )
-            )
-        }
     }
 
     private fun updateSymbolFromTick(
@@ -760,8 +799,12 @@ class SmartApiBackendClient {
                     )
                 )
             }
-        } else if (symbol.isNotBlank() && !symbol.startsWith("TOKEN_")) {
-            val cleanSym = symbol.removeSuffix("-EQ")
+        } else {
+            val cleanSym = if (symbol.isNotBlank() && !symbol.startsWith("TOKEN_")) {
+                symbol.removeSuffix("-EQ")
+            } else {
+                dynamicTokenToSymbol[token] ?: "TOKEN_$token"
+            }
             val prevClose = if (change != 0.0) (ltp - change) else ltp
             val newStock = StockSymbol(
                 symbol = cleanSym,
@@ -1008,10 +1051,14 @@ class SmartApiBackendClient {
     }
 
     /**
-     * Calculates the newest valid trading session date range in IST (Asia/Kolkata)
+     * Calculates the valid trading session date range in IST (Asia/Kolkata)
      * for Angel One SmartAPI historical candle requests (fromdate to todate).
+     * Supports Today, Yesterday, 2 Days Ago, and 5 Days historical sessions.
      */
-    private fun calculateTradingSessionDateRange(timeframe: Timeframe): Pair<String, String> {
+    fun calculateTradingSessionDateRange(
+        timeframe: Timeframe,
+        session: TradingSession = TradingSession.TODAY
+    ): Pair<String, String> {
         val istZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
         val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).apply {
             timeZone = istZone
@@ -1044,9 +1091,24 @@ class SmartApiBackendClient {
             }
         }
 
+        // Apply session offset in trading days (skipping weekends)
+        var offsetDays = session.offsetTradingDays
+        while (offsetDays > 0) {
+            sessionCal.add(java.util.Calendar.DAY_OF_MONTH, -1)
+            val dow = sessionCal.get(java.util.Calendar.DAY_OF_WEEK)
+            if (dow != java.util.Calendar.SATURDAY && dow != java.util.Calendar.SUNDAY) {
+                offsetDays--
+            }
+        }
+        while (sessionCal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SATURDAY ||
+               sessionCal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SUNDAY) {
+            sessionCal.add(java.util.Calendar.DAY_OF_MONTH, -1)
+        }
+
         // Set session end time (todate)
         val endCal = sessionCal.clone() as java.util.Calendar
-        val isTodaySession = now.get(java.util.Calendar.YEAR) == sessionCal.get(java.util.Calendar.YEAR) &&
+        val isTodaySession = session == TradingSession.TODAY &&
+                now.get(java.util.Calendar.YEAR) == sessionCal.get(java.util.Calendar.YEAR) &&
                 now.get(java.util.Calendar.DAY_OF_YEAR) == sessionCal.get(java.util.Calendar.DAY_OF_YEAR)
 
         if (isTodaySession && (hour < 15 || (hour == 15 && minute <= 30))) {
@@ -1059,38 +1121,45 @@ class SmartApiBackendClient {
         endCal.set(java.util.Calendar.SECOND, 0)
         endCal.set(java.util.Calendar.MILLISECOND, 0)
 
-        // Set session start time (fromdate) based on timeframe granularity
+        // Set session start time (fromdate) based on timeframe and session
         val startCal = sessionCal.clone() as java.util.Calendar
-        when (timeframe) {
-            Timeframe.SEC_1, Timeframe.SEC_5, Timeframe.SEC_15, Timeframe.SEC_30,
-            Timeframe.MIN_1, Timeframe.MIN_3, Timeframe.MIN_5 -> {
-                startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
-                startCal.set(java.util.Calendar.MINUTE, 15)
-                startCal.set(java.util.Calendar.SECOND, 0)
-                startCal.set(java.util.Calendar.MILLISECOND, 0)
+        if (session == TradingSession.FIVE_DAYS) {
+            var backDays = 5
+            while (backDays > 0) {
+                startCal.add(java.util.Calendar.DAY_OF_MONTH, -1)
+                val dow = startCal.get(java.util.Calendar.DAY_OF_WEEK)
+                if (dow != java.util.Calendar.SATURDAY && dow != java.util.Calendar.SUNDAY) {
+                    backDays--
+                }
             }
-            Timeframe.MIN_15, Timeframe.MIN_30 -> {
-                startCal.add(java.util.Calendar.DAY_OF_MONTH, -7)
-                startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
-                startCal.set(java.util.Calendar.MINUTE, 15)
-                startCal.set(java.util.Calendar.SECOND, 0)
-                startCal.set(java.util.Calendar.MILLISECOND, 0)
-            }
-            Timeframe.HOUR_1 -> {
-                startCal.add(java.util.Calendar.DAY_OF_MONTH, -30)
-                startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
-                startCal.set(java.util.Calendar.MINUTE, 15)
-                startCal.set(java.util.Calendar.SECOND, 0)
-                startCal.set(java.util.Calendar.MILLISECOND, 0)
-            }
-            Timeframe.DAY_1 -> {
-                startCal.add(java.util.Calendar.DAY_OF_MONTH, -180)
-                startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
-                startCal.set(java.util.Calendar.MINUTE, 15)
-                startCal.set(java.util.Calendar.SECOND, 0)
-                startCal.set(java.util.Calendar.MILLISECOND, 0)
+            startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+            startCal.set(java.util.Calendar.MINUTE, 15)
+        } else {
+            when (timeframe) {
+                Timeframe.SEC_1, Timeframe.SEC_5, Timeframe.SEC_15, Timeframe.SEC_30,
+                Timeframe.MIN_1, Timeframe.MIN_3, Timeframe.MIN_5 -> {
+                    startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                    startCal.set(java.util.Calendar.MINUTE, 15)
+                }
+                Timeframe.MIN_15, Timeframe.MIN_30 -> {
+                    startCal.add(java.util.Calendar.DAY_OF_MONTH, -7)
+                    startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                    startCal.set(java.util.Calendar.MINUTE, 15)
+                }
+                Timeframe.HOUR_1 -> {
+                    startCal.add(java.util.Calendar.DAY_OF_MONTH, -30)
+                    startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                    startCal.set(java.util.Calendar.MINUTE, 15)
+                }
+                Timeframe.DAY_1 -> {
+                    startCal.add(java.util.Calendar.DAY_OF_MONTH, -180)
+                    startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                    startCal.set(java.util.Calendar.MINUTE, 15)
+                }
             }
         }
+        startCal.set(java.util.Calendar.SECOND, 0)
+        startCal.set(java.util.Calendar.MILLISECOND, 0)
 
         return Pair(sdf.format(startCal.time), sdf.format(endCal.time))
     }
@@ -1104,6 +1173,7 @@ class SmartApiBackendClient {
         symbolToken: String,
         exchange: String = "NSE",
         timeframe: Timeframe = Timeframe.MIN_1,
+        session: TradingSession = TradingSession.TODAY,
         count: Int = 120
     ): List<Candle> = withContext(Dispatchers.IO) {
         val sanitizedToken = symbolToken.trim()
@@ -1123,7 +1193,7 @@ class SmartApiBackendClient {
             Timeframe.DAY_1 -> "ONE_DAY"
         }
 
-        val (fromDateStr, toDateStr) = calculateTradingSessionDateRange(timeframe)
+        val (fromDateStr, toDateStr) = calculateTradingSessionDateRange(timeframe, session)
         val encodedFrom = java.net.URLEncoder.encode(fromDateStr, "UTF-8")
         val encodedTo = java.net.URLEncoder.encode(toDateStr, "UTF-8")
 

@@ -157,16 +157,45 @@ class ScripMasterManager {
       }
     }
 
-    // Special aliases for renamed or demerged scrips
-    const tataMotorsScrip = this.tokenIndex.get('3456');
-    if (tataMotorsScrip) {
-      this.symbolIndex.set('TATAMOTORS', tataMotorsScrip);
-      this.symbolIndex.set('TATAMOTORS-EQ', tataMotorsScrip);
+    // Special aliases for renamed, demerged, or multi-name scrips
+    const aliasMappings = [
+      { sym: 'TATAMOTORS', token: '3456' },
+      { sym: 'BEL', token: '383' },
+      { sym: 'ZOMATO', token: '5097' },
+      { sym: 'ETERNAL', token: '5097' },
+      { sym: 'HUL', token: '1394' },
+      { sym: 'HINDUNILVR', token: '1394' },
+      { sym: 'LT', token: '11483' },
+      { sym: 'L&T', token: '11483' },
+      { sym: 'M&M', token: '2031' },
+      { sym: 'NIFTY', token: '99926000' },
+      { sym: 'NIFTY 50', token: '99926000' },
+      { sym: 'BANKNIFTY', token: '99926009' },
+      { sym: 'NIFTY BANK', token: '99926009' },
+      { sym: 'FINNIFTY', token: '99926037' },
+      { sym: 'MIDCPNIFTY', token: '99926074' }
+    ];
+    for (const mapping of aliasMappings) {
+      const targetScrip = this.tokenIndex.get(mapping.token);
+      if (targetScrip) {
+        this.symbolIndex.set(mapping.sym, targetScrip);
+        this.symbolIndex.set(`${mapping.sym}-EQ`, targetScrip);
+      }
     }
-    const belScrip = this.tokenIndex.get('383');
-    if (belScrip) {
-      this.symbolIndex.set('BEL', belScrip);
-      this.symbolIndex.set('BEL-EQ', belScrip);
+
+    // Always register all fallback stocks so base symbols and indices are always reachable
+    for (const fb of DEFAULT_FALLBACK_STOCKS) {
+      const fbSym = fb.symbol.toUpperCase();
+      const fbClean = fbSym.replace(/-EQ$/i, '');
+      if (!this.symbolIndex.has(fbClean)) {
+        this.symbolIndex.set(fbClean, fb);
+      }
+      if (!this.symbolIndex.has(fbSym)) {
+        this.symbolIndex.set(fbSym, fb);
+      }
+      if (!this.tokenIndex.has(String(fb.token).trim())) {
+        this.tokenIndex.set(String(fb.token).trim(), fb);
+      }
     }
 
     this.totalInstruments = this.scrips.length;
