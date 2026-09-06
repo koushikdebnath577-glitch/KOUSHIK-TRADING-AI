@@ -1254,13 +1254,25 @@ class SmartApiBackendClient {
             startCal.set(java.util.Calendar.MINUTE, 15)
         } else {
             when (timeframe) {
-                Timeframe.SEC_1, Timeframe.SEC_5, Timeframe.SEC_15, Timeframe.SEC_30,
-                Timeframe.MIN_1, Timeframe.MIN_3, Timeframe.MIN_5 -> {
+                Timeframe.SEC_1, Timeframe.SEC_5, Timeframe.SEC_15, Timeframe.SEC_30 -> {
                     startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
                     startCal.set(java.util.Calendar.MINUTE, 15)
                 }
-                Timeframe.MIN_15, Timeframe.MIN_30 -> {
-                    startCal.add(java.util.Calendar.DAY_OF_MONTH, -7)
+                Timeframe.MIN_1, Timeframe.MIN_3, Timeframe.MIN_5, Timeframe.MIN_15 -> {
+                    // Fetch 7 trading days of historical candles for intraday timeframes (1m, 3m, 5m, 15m)
+                    var backDays = 7
+                    while (backDays > 0) {
+                        startCal.add(java.util.Calendar.DAY_OF_MONTH, -1)
+                        val dow = startCal.get(java.util.Calendar.DAY_OF_WEEK)
+                        if (dow != java.util.Calendar.SATURDAY && dow != java.util.Calendar.SUNDAY) {
+                            backDays--
+                        }
+                    }
+                    startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                    startCal.set(java.util.Calendar.MINUTE, 15)
+                }
+                Timeframe.MIN_30 -> {
+                    startCal.add(java.util.Calendar.DAY_OF_MONTH, -14)
                     startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
                     startCal.set(java.util.Calendar.MINUTE, 15)
                 }
@@ -1292,7 +1304,7 @@ class SmartApiBackendClient {
         exchange: String = "NSE",
         timeframe: Timeframe = Timeframe.MIN_1,
         session: TradingSession = TradingSession.TODAY,
-        count: Int = 120
+        count: Int = 2000
     ): List<Candle> = withContext(Dispatchers.IO) {
         val sanitizedToken = symbolToken.trim()
         if (sanitizedToken.isEmpty()) return@withContext emptyList()

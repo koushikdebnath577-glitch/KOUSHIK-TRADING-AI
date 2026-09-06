@@ -71,8 +71,8 @@ class CandleAggregator(
                 isComplete = false
             )
             _candles.add(newCandle)
-            // Limit memory buffer
-            if (_candles.size > 250) {
+            // Limit memory buffer (allow up to 5000 candles for smooth multi-day intraday panning)
+            if (_candles.size > 5000) {
                 _candles.removeAt(0)
             }
             newCandle

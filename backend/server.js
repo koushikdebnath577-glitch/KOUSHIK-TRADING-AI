@@ -1425,7 +1425,8 @@ app.get(['/api/candles', '/candles'], async (req, res) => {
 
   // C. Fallback: Generate clean synthetic intraday candles with market structure
   const stock = tokenMap.get(symbolToken) || { ltp: 1000.0 };
-  const count = parseInt(req.query.count, 10) || 120;
+  const requestedCount = parseInt(req.query.count, 10);
+  const count = (!isNaN(requestedCount) && requestedCount > 0) ? Math.min(requestedCount, 3000) : 500;
   const intervalSeconds = mapIntervalToSeconds(interval);
   const syntheticCandles = generateSyntheticCandles(stock.ltp, intervalSeconds, count);
 

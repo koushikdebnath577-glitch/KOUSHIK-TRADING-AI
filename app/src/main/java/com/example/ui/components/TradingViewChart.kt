@@ -414,7 +414,7 @@ private fun ChartCoreContent(
         }
 
         // Main Chart Canvas Container
-        val chartBoxModifier = if (isFullscreen) Modifier.weight(1f) else Modifier.height(340.dp)
+        val chartBoxModifier = if (isFullscreen) Modifier.weight(1f) else Modifier.height(380.dp)
 
         Box(
             modifier = Modifier

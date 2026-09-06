@@ -62,6 +62,7 @@ fun AnalyzeScreen(
             .fillMaxSize()
             .background(BgDarkNavy)
             .padding(horizontal = 14.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. Connection and Stock Header
