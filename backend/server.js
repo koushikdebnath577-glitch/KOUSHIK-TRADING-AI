@@ -15,6 +15,28 @@
  */
 
 require('dotenv').config();
+
+// ------------------------------------------------------------------------------
+// GLOBAL PROCESS SAFETY HANDLERS (CRASH PREVENTION FOR RENDER / CLOUD HOSTS)
+// ------------------------------------------------------------------------------
+function sanitizeLog(msg) {
+  if (!msg) return '';
+  let str = typeof msg === 'string' ? msg : (msg.stack || msg.message || JSON.stringify(msg));
+  if (process.env.ANGEL_API_KEY) str = str.split(process.env.ANGEL_API_KEY).join('[REDACTED_KEY]');
+  if (process.env.ANGEL_CLIENT_ID) str = str.split(process.env.ANGEL_CLIENT_ID).join('[REDACTED_CLIENT]');
+  if (process.env.ANGEL_PIN) str = str.split(process.env.ANGEL_PIN).join('[REDACTED_PIN]');
+  if (process.env.ANGEL_TOTP_SECRET) str = str.split(process.env.ANGEL_TOTP_SECRET).join('[REDACTED_TOTP]');
+  return str;
+}
+
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL UNCAUGHT EXCEPTION] Caught safely:', sanitizeLog(err));
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION] Caught safely:', sanitizeLog(reason));
+});
+
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
@@ -1340,48 +1362,39 @@ app.get(['/api/quote', '/quote'], async (req, res) => {
   });
 });
 
+// In-flight deduplication map: prevents multiple simultaneous requests for same token+interval+dates
+const inFlightCandleRequests = new Map();
+
+// Rate limiter / serial queue for Angel One historical candle API calls
+let lastSmartApiCandleCallTime = 0;
+const SMARTAPI_MIN_CALL_GAP_MS = 350; // Max ~3 requests/second to safely respect 3 req/sec rate limit
+
+async function acquireSmartApiCandleSlot() {
+  const now = Date.now();
+  const timeSinceLast = now - lastSmartApiCandleCallTime;
+  if (timeSinceLast < SMARTAPI_MIN_CALL_GAP_MS) {
+    await new Promise(resolve => setTimeout(resolve, SMARTAPI_MIN_CALL_GAP_MS - timeSinceLast));
+  }
+  lastSmartApiCandleCallTime = Date.now();
+}
+
 /**
- * GET /api/candles
- * Historical & live aggregated candlestick data
- * Parameters: exchange, symboltoken, interval (1s, 5s, 15s, 30s, ONE_MINUTE, FIVE_MINUTE, etc.), fromdate, todate
+ * Fetch a single candle chunk from Angel One SmartAPI with rate-limit control and retry backoff
  */
-app.get(['/api/candles', '/candles'], async (req, res) => {
-  const symbolToken = (req.query.symboltoken || req.query.token || '').toString().trim();
-  const exchange = (req.query.exchange || 'NSE').toString().toUpperCase();
-  const interval = (req.query.interval || 'ONE_MINUTE').toString();
-  const fromDate = req.query.fromdate || '';
-  const toDate = req.query.todate || '';
-
-  if (!symbolToken) {
-    return res.status(400).json({ status: false, error: 'Missing required parameter: symboltoken' });
-  }
-
-  // A. Check if sub-second candles are requested (1s, 5s, 15s, 30s)
-  if (['1s', '5s', '15s', '30s', '1S', '5S', '15S', '30S'].includes(interval)) {
-    const key = interval.toLowerCase();
-    const liveCandles = candleAggregator.getCandles(symbolToken, key);
-
-    // If buffer has candles, return them directly
-    if (liveCandles.length > 0) {
-      return res.json({
-        status: true,
-        interval: key,
-        token: symbolToken,
-        count: liveCandles.length,
-        data: liveCandles
-      });
-    }
-  }
-
-  // B. If Angel One is authenticated and standard timeframe is requested, query SmartAPI historical candle API
-  if (isAngelConfigured() && authManager.isAuthenticated && fromDate && toDate) {
+async function fetchSmartApiCandleChunk(exchange, symbolToken, smartApiInterval, fromDate, toDate) {
+  const maxRetries = 2;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      await acquireSmartApiCandleSlot();
+
+      console.log(`[SmartAPI getCandleData Outgoing] exchange=${exchange}, symboltoken=${symbolToken}, interval=${smartApiInterval}, fromdate="${fromDate}", todate="${toDate}"`);
+
       const response = await axios.post(
         `${SMARTAPI_BASE_URL}/rest/secure/angelbroking/historical/v1/getCandleData`,
         {
           exchange,
           symboltoken: symbolToken,
-          interval: mapIntervalToSmartApi(interval),
+          interval: smartApiInterval,
           fromdate: fromDate,
           todate: toDate
         },
@@ -1392,51 +1405,187 @@ app.get(['/api/candles', '/candles'], async (req, res) => {
       );
 
       if (response.data && response.data.status && Array.isArray(response.data.data)) {
-        // Map SmartAPI array format [timestampStr, open, high, low, close, volume]
-        const formattedCandles = response.data.data.map(item => {
-          let dateStr = String(item[0]).trim();
-          if (!dateStr.includes('+') && !dateStr.includes('Z')) {
-            dateStr = dateStr.replace(' ', 'T') + '+05:30';
-          }
-          const ts = new Date(dateStr).getTime();
-          return {
-            timestamp: isNaN(ts) ? new Date(item[0]).getTime() : ts,
-            open: Number(item[1]),
-            high: Number(item[2]),
-            low: Number(item[3]),
-            close: Number(item[4]),
-            volume: Number(item[5]) || 0,
-            isComplete: true
-          };
-        });
+        return response.data.data;
+      }
+      
+      // If SmartAPI returned an API error status (e.g. rate limit / invalid session), log without exposing secrets
+      const errorMsg = response.data?.message || 'Empty or unsuccessful SmartAPI response';
+      const errorCode = response.data?.errorcode || response.data?.status;
+      console.warn(`[REST Candles] SmartAPI response for ${symbolToken} (Attempt ${attempt}/${maxRetries}): code=${errorCode} message="${errorMsg}"`);
+      return [];
+    } catch (err) {
+      const status = err.response?.status;
+      const apiMsg = err.response?.data?.message || err.message;
+      const statusMsg = status ? `HTTP ${status}` : err.message;
+      if (status === 429 && attempt < maxRetries) {
+        // Rate limited: wait 1.2s before single retry
+        console.warn(`[REST Candles] Rate limited (429) for ${symbolToken}. Backing off...`);
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        continue;
+      }
+      console.warn(`[REST Candles] Attempt ${attempt} failed (${statusMsg}: ${apiMsg}) for token ${symbolToken}`);
+      if (attempt === maxRetries) {
+        throw err;
+      }
+    }
+  }
+  return [];
+}
 
+/**
+ * GET /api/candles
+ * Historical & live aggregated candlestick data
+ * Parameters: exchange, symboltoken, interval (1s, 5s, 15s, 30s, ONE_MINUTE, FIVE_MINUTE, etc.), fromdate, todate, count
+ */
+app.get(['/api/candles', '/candles'], async (req, res) => {
+  const symbolToken = (req.query.symboltoken || req.query.token || '').toString().trim();
+  const exchange = (req.query.exchange || 'NSE').toString().toUpperCase();
+  const interval = (req.query.interval || 'ONE_MINUTE').toString();
+  const fromDate = (req.query.fromdate || '').toString().trim();
+  const toDate = (req.query.todate || '').toString().trim();
+  const requestedCount = parseInt(req.query.count, 10);
+  const maxCandles = (!isNaN(requestedCount) && requestedCount > 0) ? Math.min(requestedCount, 2500) : 2000;
+
+  if (!symbolToken) {
+    return res.status(400).json({
+      status: false,
+      source: 'validation_error',
+      error: 'Missing required parameter: symboltoken',
+      data: []
+    });
+  }
+
+  // A. Check if sub-second candles are requested (1s, 5s, 15s, 30s)
+  if (['1s', '5s', '15s', '30s', '1S', '5S', '15S', '30S'].includes(interval)) {
+    try {
+      const key = interval.toLowerCase();
+      const liveCandles = candleAggregator.getCandles(symbolToken, key);
+
+      if (liveCandles && liveCandles.length > 0) {
+        const safeCandles = liveCandles.slice(-Math.min(maxCandles, 1000));
         return res.json({
           status: true,
-          source: 'smartapi_historical',
+          interval: key,
           token: symbolToken,
-          count: formattedCandles.length,
-          data: formattedCandles
+          count: safeCandles.length,
+          data: safeCandles
         });
       }
-    } catch (err) {
-      console.warn(`[REST Candles] SmartAPI candle fetch failed: ${err.message}. Generating intraday candles.`);
+    } catch (subErr) {
+      console.warn(`[REST Candles] Sub-second candle buffer read error for token ${symbolToken}: ${subErr.message}`);
     }
   }
 
-  // C. Fallback: Generate clean synthetic intraday candles with market structure
-  const stock = tokenMap.get(symbolToken) || { ltp: 1000.0 };
-  const requestedCount = parseInt(req.query.count, 10);
-  const count = (!isNaN(requestedCount) && requestedCount > 0) ? Math.min(requestedCount, 3000) : 500;
-  const intervalSeconds = mapIntervalToSeconds(interval);
-  const syntheticCandles = generateSyntheticCandles(stock.ltp, intervalSeconds, count);
+  // B. In-flight request deduplication key to prevent repeated parallel calls for identical parameters
+  const inFlightKey = `${exchange}_${symbolToken}_${interval}_${fromDate}_${toDate}_${maxCandles}`;
+  if (inFlightCandleRequests.has(inFlightKey)) {
+    try {
+      const existingResult = await inFlightCandleRequests.get(inFlightKey);
+      return res.json(existingResult);
+    } catch (inFlightErr) {
+      // If shared promise failed, continue to fallback below
+    }
+  }
 
-  res.json({
-    status: true,
-    source: 'market_structure_engine',
+  // C. Query SmartAPI historical candle API if authenticated
+  if (isAngelConfigured() && authManager.isAuthenticated && fromDate && toDate) {
+    const fetchPromise = (async () => {
+      try {
+        const smartApiInterval = mapIntervalToSmartApi(interval);
+        const rawCandles = await fetchSmartApiCandleChunk(exchange, symbolToken, smartApiInterval, fromDate, toDate);
+
+        if (Array.isArray(rawCandles) && rawCandles.length > 0) {
+          // Map, deduplicate by timestamp, and sort chronologically
+          const candleMap = new Map();
+
+          for (let i = 0; i < rawCandles.length; i++) {
+            const item = rawCandles[i];
+            if (!item || !Array.isArray(item) || item.length < 5) continue;
+
+            let dateStr = String(item[0]).trim();
+            if (!dateStr.includes('+') && !dateStr.includes('Z')) {
+              dateStr = dateStr.replace(' ', 'T') + '+05:30';
+            }
+            const ts = new Date(dateStr).getTime();
+            const validTs = isNaN(ts) ? new Date(item[0]).getTime() : ts;
+            if (isNaN(validTs) || validTs <= 0) continue;
+
+            const open = Number(item[1]);
+            const high = Number(item[2]);
+            const low = Number(item[3]);
+            const close = Number(item[4]);
+            const volume = Number(item[5]) || 0;
+
+            if (open > 0 && high > 0 && low > 0 && close > 0 && high >= low) {
+              candleMap.set(validTs, {
+                timestamp: validTs,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                isComplete: true
+              });
+            }
+          }
+
+          // Convert map values to sorted array
+          const sortedCandles = Array.from(candleMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+          const finalCandles = sortedCandles.length > maxCandles ? sortedCandles.slice(-maxCandles) : sortedCandles;
+
+          if (finalCandles.length > 0) {
+            return {
+              status: true,
+              source: 'smartapi_historical',
+              token: symbolToken,
+              count: finalCandles.length,
+              data: finalCandles
+            };
+          }
+        }
+      } catch (err) {
+        const statusMsg = err.response?.status ? `HTTP ${err.response.status}` : err.message;
+        console.warn(`[REST Candles] SmartAPI fetch failed (${statusMsg}) for token ${symbolToken}`);
+      }
+
+      // Return structured unavailable status if empty or failed
+      return {
+        status: false,
+        source: 'smartapi_unavailable',
+        token: symbolToken,
+        interval,
+        message: 'Historical market data is temporarily unavailable',
+        data: []
+      };
+    })();
+
+    inFlightCandleRequests.set(inFlightKey, fetchPromise);
+
+    try {
+      const responsePayload = await fetchPromise;
+      return res.json(responsePayload);
+    } catch (execErr) {
+      console.error(`[REST Candles] Execution exception for token ${symbolToken}: ${execErr.message}`);
+      return res.json({
+        status: false,
+        source: 'smartapi_unavailable',
+        token: symbolToken,
+        message: 'Historical market data is temporarily unavailable',
+        data: []
+      });
+    } finally {
+      inFlightCandleRequests.delete(inFlightKey);
+    }
+  }
+
+  // D. Angel One not configured, unauthenticated, or missing date parameters
+  return res.json({
+    status: false,
+    source: 'smartapi_unavailable',
     token: symbolToken,
     interval,
-    count: syntheticCandles.length,
-    data: syntheticCandles
+    message: 'Historical market data is temporarily unavailable',
+    data: []
   });
 });
 
@@ -1455,62 +1604,6 @@ function mapIntervalToSmartApi(interval) {
   return 'ONE_MINUTE';
 }
 
-function mapIntervalToSeconds(interval) {
-  const upper = interval.toUpperCase();
-  if (upper === '1S') return 1;
-  if (upper === '5S') return 5;
-  if (upper === '15S') return 15;
-  if (upper === '30S') return 30;
-  if (upper === '1M' || upper === 'ONE_MINUTE') return 60;
-  if (upper === '3M' || upper === 'THREE_MINUTE') return 180;
-  if (upper === '5M' || upper === 'FIVE_MINUTE') return 300;
-  if (upper === '15M' || upper === 'FIFTEEN_MINUTE') return 900;
-  if (upper === '30M' || upper === 'THIRTY_MINUTE') return 1800;
-  if (upper === '1H' || upper === 'ONE_HOUR') return 3600;
-  if (upper === '1D' || upper === 'ONE_DAY') return 86400;
-  return 60;
-}
-
-function generateSyntheticCandles(baseLtp, intervalSeconds, count) {
-  const candles = [];
-  const now = Date.now();
-  const intervalMs = intervalSeconds * 1000;
-  let price = baseLtp * (1.0 - 0.008);
-
-  for (let i = count; i >= 1; i--) {
-    const time = now - (i * intervalMs);
-    const open = price;
-    const drift = (Math.random() * 0.003) - 0.0014;
-    const rawClose = open * (1.0 + drift);
-    const high = Math.max(open, rawClose) + (open * Math.random() * 0.0015);
-    const low = Math.min(open, rawClose) - (open * Math.random() * 0.0012);
-    const close = Math.min(high, Math.max(low, rawClose));
-    const volume = Math.floor(Math.random() * 60000) + 5000;
-
-    candles.push({
-      timestamp: time,
-      open: Math.round(open * 100) / 100,
-      high: Math.round(high * 100) / 100,
-      low: Math.round(low * 100) / 100,
-      close: Math.round(close * 100) / 100,
-      volume,
-      isComplete: true
-    });
-    price = close;
-  }
-
-  // Adjust last candle close to current LTP
-  if (candles.length > 0) {
-    const last = candles[candles.length - 1];
-    last.close = baseLtp;
-    last.high = Math.max(last.high, baseLtp);
-    last.low = Math.min(last.low, baseLtp);
-    last.isComplete = false;
-  }
-
-  return candles;
-}
-
 // ------------------------------------------------------------------------------
 // 8. SERVER INITIALIZATION & WEBSOCKET ROUTING
 // ------------------------------------------------------------------------------
@@ -1519,6 +1612,9 @@ const server = http.createServer(app);
 // WebSocket Server attached to HTTP server
 const wss = new WebSocketServer({ noServer: true });
 wss.on('connection', handleClientWebSocket);
+wss.on('error', (err) => {
+  console.error('[WSS Error] WebSocket server error:', err?.message || err);
+});
 
 // Handle HTTP upgrade for WebSocket endpoints (/ws/market and /ws/ticks)
 server.on('upgrade', (request, socket, head) => {
@@ -1531,6 +1627,10 @@ server.on('upgrade', (request, socket, head) => {
   } else {
     socket.destroy();
   }
+});
+
+server.on('error', (err) => {
+  console.error('[Server Error] HTTP server error:', err?.message || err);
 });
 
 // Start HTTP & WS Server
@@ -1568,17 +1668,25 @@ server.listen(PORT, async () => {
   }
 
   // Attempt initial Angel One SmartAPI authentication
-  if (isAngelConfigured()) {
-    console.log('[Init] Angel One credentials detected in environment variables.');
-    const loggedIn = await authManager.login();
-    if (loggedIn) {
-      upstreamMarketFeed.connect();
+  try {
+    if (isAngelConfigured()) {
+      console.log('[Init] Angel One credentials detected in environment variables.');
+      const loggedIn = await authManager.login().catch(err => {
+        console.warn(`[Init] Login exception: ${err.message}`);
+        return false;
+      });
+      if (loggedIn) {
+        upstreamMarketFeed.connect();
+      } else {
+        console.warn('[Init] Login failed, falling back to market standby simulation.');
+        upstreamMarketFeed.startSimulationFeed();
+      }
     } else {
-      console.warn('[Init] Login failed, falling back to market standby simulation.');
+      console.log('[Init] Angel One credentials not set. Running in live Standby / Simulation mode.');
       upstreamMarketFeed.startSimulationFeed();
     }
-  } else {
-    console.log('[Init] Angel One credentials not set. Running in live Standby / Simulation mode.');
+  } catch (initAuthErr) {
+    console.warn(`[Init] Initial auth flow exception: ${initAuthErr.message}. Starting fallback simulation feed.`);
     upstreamMarketFeed.startSimulationFeed();
   }
 });
